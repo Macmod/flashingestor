@@ -28,18 +28,13 @@ func (m *MSRPC) GetMachineSid(handle *samr.Handle, testName *string) (*dtyp.SID,
 	if err == nil {
 		sid = result.DomainID
 	} else {
-		domainResult, err := client.EnumerateDomainsInSAMServer(m.Context, &samr.EnumerateDomainsInSAMServerRequest{
-			Server:                 handle,
-			EnumerationContext:     0,
-			PreferredMaximumLength: 0xFFFFFFFF,
-		})
-
+		domains, err := m.enumerateDomainsInSAMServer(handle)
 		if err != nil {
 			return nil, fmt.Errorf("error running EnumerateDomainsInSAMServer: %w", err)
 		}
 
-		if len(domainResult.Buffer.Buffer) > 0 {
-			targetDomain := domainResult.Buffer.Buffer[0]
+		if len(domains) > 0 {
+			targetDomain := domains[0]
 			result, err := client.LookupDomainInSAMServer(m.Context, &samr.LookupDomainInSAMServerRequest{
 				Server: handle,
 				Name:   &dtyp.UnicodeString{Buffer: targetDomain.Name.Buffer},

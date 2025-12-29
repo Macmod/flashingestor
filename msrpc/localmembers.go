@@ -33,18 +33,12 @@ func (m *MSRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 
 	handle := samrConResp.Server
 
-	// TODO: Pagination?
-	domsResp, err := client.EnumerateDomainsInSAMServer(m.Context, &samr.EnumerateDomainsInSAMServerRequest{
-		Server:                 handle,
-		EnumerationContext:     0,
-		PreferredMaximumLength: 0xFFFFFFFF,
-	})
-
+	domains, err := m.enumerateDomainsInSAMServer(handle)
 	if err != nil {
-		return nil, fmt.Errorf("x EnumerateDomainsInSAMServer failed: %w", err)
+		return nil, fmt.Errorf("EnumerateDomainsInSAMServer failed: %w", err)
 	}
 
-	for _, domain := range domsResp.Buffer.Buffer {
+	for _, domain := range domains {
 		if isDC && !strings.EqualFold(domain.Name.Buffer, "Builtin") {
 			continue
 		}
@@ -54,7 +48,8 @@ func (m *MSRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 			Name:   domain.Name,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("LookupDomainInSAMServer failed: %w", err)
+			//return nil, fmt.Errorf("LookupDomainInSAMServer failed: %w", err)
+			continue
 		}
 
 		domainResp, err := client.OpenDomain(m.Context, &samr.OpenDomainRequest{
@@ -63,19 +58,17 @@ func (m *MSRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 			DesiredAccess: 0x00000200 | dtyp.AccessMaskMaximumAllowed,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("SamrOpenDomain failed: %w", err)
+			//return nil, fmt.Errorf("SamrOpenDomain failed: %w", err)
+			continue
 		}
 
-		// TODO: Pagination?
-		aliasesResp, err := client.EnumerateAliasesInDomain(m.Context, &samr.EnumerateAliasesInDomainRequest{
-			Domain:             domainResp.Domain,
-			EnumerationContext: 0,
-		})
+		aliases, err := m.enumerateAliasesInDomain(client, domainResp.Domain)
 		if err != nil {
-			return nil, fmt.Errorf("SamrEnumerateAliasesInDomain failed: %w", err)
+			//return nil, fmt.Errorf("EnumerateAliasesInDomain failed: %w", err)
+			continue
 		}
 
-		for _, alias := range aliasesResp.Buffer.Buffer {
+		for _, alias := range aliases {
 			localGroupMembers := make([]string, 0)
 
 			aliasResp, err := client.OpenAlias(m.Context, &samr.OpenAliasRequest{
@@ -84,14 +77,16 @@ func (m *MSRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 				AliasID:       alias.RelativeID,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("SamrOpenAlias failed: %w", err)
+				//return nil, fmt.Errorf("SamrOpenAlias failed: %w", err)
+				continue
 			}
 
 			membersResp, err := client.GetMembersInAlias(m.Context, &samr.GetMembersInAliasRequest{
 				AliasHandle: aliasResp.AliasHandle,
 			})
-			if err != nil {
-				return nil, fmt.Errorf("SamrGetMembersInAlias failed: %w", err)
+			if err != nil || membersResp == nil || membersResp.Members == nil {
+				//return nil, fmt.Errorf("SamrGetMembersInAlias failed: %w", err)
+				continue
 			}
 
 			for _, member := range membersResp.Members.SIDs {
