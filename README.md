@@ -17,7 +17,7 @@ This is still a *beta* version, so don't expect everything to work perfectly.
 
 # Implementation Details
 
-Flashingestor implements 3 basic separate steps `LDAP Ingestion`, `Remote Collection` and `Conversion`, contrary to other collectors which run the specified methods in a single step:
+`Flashingestor` implements 3 basic separate steps `LDAP Ingestion`, `Remote Collection` and `Conversion`, contrary to other collectors which run the specified methods in a single step:
 
 - **Ingest** (`Ctrl+l`) - Collects raw object attributes' data from LDAP and stores that under `output/ldap` into intermediate `msgpack` files. Queries can be customized in `config.yaml`.
 
@@ -25,7 +25,7 @@ Flashingestor implements 3 basic separate steps `LDAP Ingestion`, `Remote Collec
 
 - **Convert** (`Ctrl+s`) - Reads the intermediate files into memory, merges information from the ingestion and remote collection steps, and generates a Bloodhound-compatible dump under `output/bloodhound` - this step is entirely offline.
 
-The main difference resource-wise is that FlashIngest needs a bit more space to store the intermediate `msgpack` files, and it takes a bit of time to convert them into BloodHound format, but the active steps `Ingest` & `Remote` *should* be relatively efficient in terms of traffic, CPU & memory.
+The main difference resource-wise is that `flashingestor` needs a bit more space to store the intermediate `msgpack` files, and it takes a bit of time to convert them into BloodHound format, but the active steps `Ingest` & `Remote` *should* be relatively efficient in terms of traffic, CPU & memory.
 
 ## Not Implemented
 
@@ -76,21 +76,21 @@ Then run the steps as desired. For a `DCOnly` collection, just run `Ctrl+l`, che
 
 ## DC discovery & DNS
 
-* If you don't specify `--dc`, `flashingestor` will try to find it with SRV / A lookups, which may add some initial delay to the `Ingest` step. In that case, you must specify `--dns` if your standard DNS server is not aware of the domain (when AD-integrated DNS is in use, just point it to the DC that hosts it).
+If you don't specify `--dc`, `flashingestor` will try to find it with SRV / A lookups, which may add some initial delay to the `Ingest` step. In that case, you must specify `--dns` if your standard DNS server is not aware of the domain (when AD-integrated DNS is in use, just point it to the DC that hosts it).
 
-* Regardless of `--dc`, if you want to run the `Remote Collection` step and your DNS server is not aware of computers in the domain, then you must specify `--dns` for the lookups.
+Regardless of `--dc`, if you want to run the `Remote Collection` step and your DNS server is not aware of computers in the domain, then you must specify `--dns` for the lookups.
 
 ## Credentials for RPC/HTTP
 
-* The `--remote-*` arguments can be used to specify a separate set of credentials for remote collection. If you don't specify these credentials, FlashIngestor will try to use the same credentials for the user provided in the standard ingestion arguments (`--user`, `--password`, etc).
+The `--remote-*` arguments can be used to specify a separate set of credentials for remote collection. If you don't specify these credentials, `flashingestor` will try to use the same credentials for the user provided in the standard ingestion arguments (`--user`, `--password`, etc).
 
 A local admin can also be used for remote collection by specifying `--remote-user Administrator@.`, for example, but the effectiveness of this approach will depend on whether the account is the built-in administrator or not, and on the values of the `FilterAdministratorToken` / `LocalAccountTokenFilterPolicy` registry keys. For more detail on this behavior, refer to [Pass-the-Hash Is Dead: Long Live LocalAccountTokenFilterPolicy](https://specterops.io/blog/2017/03/16/pass-the-hash-is-dead-long-live-localaccounttokenfilterpolicy/)
 
 ## Customization
 
-* The default queries in the provided `config.yaml` (and hardcoded in the code for the case in which no config file is present) are designed with information needed by Bloodhound conversion in mind. You may choose to customize queries or attributes in `config.yaml`, but it's best to try to avoid removing needed attributes, and to avoid changing the meaning of the search filters.
+The default queries in the provided `config.yaml` (and hardcoded in the code for the case in which no config file is present) are designed with information needed by Bloodhound conversion in mind. You may choose to customize queries or attributes in `config.yaml`, but it's best to try to avoid removing needed attributes, and to avoid changing the meaning of the search filters.
 
-* It's advisable to review the values of all settings in `config.yaml` before running `flashingestor`. In particular:
+It's advisable to review the values of all settings in `config.yaml` before running `flashingestor`. In particular:
 1) If you intend to run the remote collection step, check the enabled `methods`. These roughly correspond to the methods offered by SharpHound.
 2) For ingestion, if `recurse_domains` is set to true, it'll try to ingest any trusted domains found recursively with the initial credential provided for ingestion.
 3) If `recurse_domains` is enabled and `recurse_feasible_only` is also set to true, it'll only try to ingest a trusted domain if the trust is (1) inbound/bidirectional and (2) either involves the initial domain, or is transitive. That means that outbound-only trusts won't be traversed, and apart from the first level of trusts, the ingestion paths stop at nontransitive trusts - if B trusts A nontransitively, then A can still authenticate into B; but if C also trusts B nontransitively, then A can't authenticate to C.
