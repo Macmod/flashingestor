@@ -96,6 +96,17 @@ It's advisable to review the values of all settings in `config.yaml` before runn
 3) If `recurse_domains` is enabled and `recurse_feasible_only` is also set to true, it'll only try to ingest a trusted domain if the trust is (1) inbound/bidirectional and (2) either involves the initial domain, or is transitive. That means that outbound-only trusts won't be traversed, and apart from the first level of trusts, the ingestion paths stop at nontransitive trusts - if B trusts A nontransitively, then A can still authenticate into B; but if C also trusts B nontransitively, then A can't authenticate to C.
 4) `compress_output` and `cleanup_after_compression` can help keep the disk usage small. After loading the final dump in Bloodhound you can safely delete the files under `output/ldap` and `output/remote` manually, if you don't have any use for them, but an interesting use case is using these files to look up important information and to avoid having to run the full collection from time to time.
 
+## Ingest files
+
+The primary purpose of the `msgpack` files is to serve as an intermediary format to segregate responsibilities for the entire process, but these files can also be used as a source of information by converting them to JSON - this way you don't have to look up twice pieces of information (such as object attributes or remote collection results) that for some reason didn't make it into the final dump.
+
+```
+$ go build ./cmd/ingest2json
+$ ./ingest2json -in output/ldap/YOURDOMAIN/SelectedFile.msgpack  -out output.json
+```
+
+[JQ](https://jqlang.org/)/[FX](https://github.com/antonmedv/fx), or your favorite programming language, can then be used to inspect the raw LDAP objects, or the raw results of the remote collection.
+
 # Contributing
 
 Contributions are welcome by [opening an issue](https://github.com/Macmod/godap/issues/new) or by [submitting a pull request](https://github.com/Macmod/godap/pulls).
