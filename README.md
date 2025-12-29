@@ -76,7 +76,7 @@ Then run the steps as desired. For a `DCOnly` collection, just run `Ctrl+l`, che
 
 ## DC discovery & DNS
 
-* If you don't specify `--dc`, `flashingest` will try to find it with SRV / A lookups, which may add some initial delay to the `Ingest` step. In that case, you must specify `--dns` if your standard DNS server is not aware of the domain (when AD-integrated DNS is in use, just point it to the DC that hosts it).
+* If you don't specify `--dc`, `flashingestor` will try to find it with SRV / A lookups, which may add some initial delay to the `Ingest` step. In that case, you must specify `--dns` if your standard DNS server is not aware of the domain (when AD-integrated DNS is in use, just point it to the DC that hosts it).
 
 * Regardless of `--dc`, if you want to run the `Remote Collection` step and your DNS server is not aware of computers in the domain, then you must specify `--dns` for the lookups.
 
