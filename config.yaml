@@ -1,0 +1,184 @@
+common:
+  verbose: 0
+
+# LDAP Ingestion Settings
+ingestion:
+  include_acls: true
+  recurse_domains: true
+  recurse_feasible_only: true 
+  queries:
+    - name: Configuration
+      filter: "(objectClass=*)"
+      page_size: 1000
+      attributes:
+        - "*"
+        - nTSecurityDescriptor
+
+    - name: Schema
+      filter: "(objectClass=*)"
+      page_size: 1000
+      attributes:
+        - name
+        - schemaIDGUID
+
+    - name: Domains
+      filter: "(objectClass=domain)"
+      page_size: 1000
+      attributes:
+        - "*"
+        - objectClass
+        - nTSecurityDescriptor
+
+    - name: Trusts
+      filter: "(objectClass=trustedDomain)"
+      page_size: 1000
+      attributes:
+        - flatName
+        - name
+        - securityIdentifier
+        - trustAttributes
+        - trustDirection
+        - trustType
+
+    - name: Containers
+      filter: "(&(!(objectClass=groupPolicyContainer))(objectClass=container))"
+      page_size: 1000
+      attributes:
+        - distinguishedName
+        - name
+        - objectGUID
+        - isCriticalSystemObject
+        - objectClass
+        - objectCategory
+        - description
+        - whencreated
+        - nTSecurityDescriptor
+
+    - name: OrganizationalUnits
+      filter: "(objectClass=organizationalUnit)"
+      page_size: 1000
+      attributes:
+        - distinguishedName
+        - name
+        - objectGUID
+        - gPLink
+        - gPOptions
+        - objectClass
+        - description
+        - whencreated
+        - nTSecurityDescriptor
+
+    - name: Users
+      filter: "(|(&(objectCategory=person)(objectClass=user))(objectClass=msDS-ManagedServiceAccount)(objectClass=msDS-GroupManagedServiceAccount))"
+      page_size: 1000
+      attributes:
+        - sAMAccountName
+        - distinguishedName
+        - sAMAccountType
+        - objectSid
+        - primaryGroupID
+        - isDeleted
+        - objectClass
+        - servicePrincipalName
+        - userAccountControl
+        - displayName
+        - lastLogon
+        - lastLogonTimestamp
+        - pwdLastSet
+        - mail
+        - title
+        - homeDirectory
+        - description
+        - userPassword
+        - adminCount
+        - msDS-AllowedToDelegateTo
+        - sIDHistory
+        - whencreated
+        - unicodepwd
+        - scriptpath
+        - nTSecurityDescriptor
+        - unixuserpassword
+        - msDS-GroupMSAMembership
+        - msDS-ManagedServiceAccount
+        - msDS-GroupManagedServiceAccount
+
+    - name: Computers
+      filter: "(&(sAMAccountType=805306369)(!(objectClass=msDS-GroupManagedServiceAccount))(!(objectClass=msDS-ManagedServiceAccount)))"
+      page_size: 1000
+      attributes:
+        - samaccountname
+        - userAccountControl
+        - distinguishedname
+        - dNSHostName
+        - samaccounttype
+        - objectSid
+        - primaryGroupID
+        - objectGUID
+        - isDeleted
+        - servicePrincipalName
+        - msDS-AllowedToDelegateTo
+        - sIDHistory
+        - whencreated
+        - lastLogon
+        - lastLogonTimestamp
+        - pwdLastSet
+        - operatingSystem
+        - description
+        - operatingSystemServicePack
+        - operatingSystemVersion
+        - nTSecurityDescriptor
+        - msDS-HostServiceAccount
+        - objectClass
+        - msDS-AllowedToActOnBehalfOfOtherIdentity
+        - ms-mcs-admpwdexpirationtime
+        - mslaps-passwordexpirationtime
+
+    - name: Groups
+      filter: "(objectClass=group)"
+      page_size: 1000
+      attributes:
+        - distinguishedName
+        - samaccountname
+        - samaccounttype
+        - objectsid
+        - member
+        - objectClass
+        - adminCount
+        - description
+        - whencreated
+        - nTSecurityDescriptor
+
+    - name: GroupPolicies
+      filter: "(objectCategory=groupPolicyContainer)"
+      page_size: 1000
+      attributes:
+        - distinguishedName
+        - name
+        - objectGUID
+        - gPCFileSysPath
+        - displayName
+        - objectClass
+        - description
+        - whencreated
+        - nTSecurityDescriptor
+
+# Remote Collection Settings
+remote_collection:
+  methods:
+    - userrights
+    - dcregistry
+    - sessions
+    - regsessions
+    - loggedon
+    - ntlmregistry
+    - caregistry
+    - webclient
+    - localgroups
+    - ldapservices 
+
+# Conversion Settings
+conversion:
+  merge_remote: true       # Merge remote results into ingested data if they exist
+  writer_bufsize: 33554432 # 32MB buffer
+  compress_output: true    # Compress JSON output files
+  cleanup_after_compression: true # Whether to remove the individual files after compression
