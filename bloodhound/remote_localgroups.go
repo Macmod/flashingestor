@@ -23,7 +23,8 @@ func (rc *RemoteCollector) collectLocalGroups(ctx context.Context, targetIp stri
 		return localGroupResults
 	}
 
-	localGroups, err := rpcObj.GetLocalGroupMembers(isDC)
+	localGroups, _ := rpcObj.GetLocalGroupMembers(isDC)
+
 	for _, localGroup := range localGroups {
 		groupRid := localGroup.RelativeID
 		groupResult := builder.LocalGroupAPIResult{}
@@ -40,21 +41,15 @@ func (rc *RemoteCollector) collectLocalGroups(ctx context.Context, targetIp stri
 			groupResult.Name = strings.ToUpper(localGroup.Name + "@" + targetHost)
 		}
 
-		collected := false
-		failureReason := ""
 		var results []builder.TypedPrincipal
 		var names []builder.NamedPrincipal
 
-		if err == nil {
-			results, names = rc.ProcessLocalGroupMembers(ctx, localGroup.Members, computerSid, targetHost, isDC, domain)
-			collected = true
-		} else {
-			failureReason = fmt.Sprint(err)
-		}
+		results, names = rc.ProcessLocalGroupMembers(ctx, localGroup.Members, computerSid, targetHost, isDC, domain)
 
+		// TODO: Any errors to handle here?
 		groupResult.APIResult = builder.APIResult{
-			Collected:     collected,
-			FailureReason: &failureReason,
+			Collected:     true,
+			FailureReason: nil,
 		}
 
 		groupResult.Results = results

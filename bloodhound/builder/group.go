@@ -1,8 +1,6 @@
 package builder
 
 import (
-	"fmt"
-	"os"
 	"slices"
 	"strings"
 
@@ -26,7 +24,6 @@ func getMembership(dn string) (TypedPrincipal, bool) {
 
 	e, ok := BState().MemberCache.Get(dn)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "Failed to resolve member DN: %s\n", dn)
 		return TypedPrincipal{}, false
 	}
 

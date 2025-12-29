@@ -122,7 +122,8 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 				}
 
 				if objectType == "LocalUser" {
-					// Throw out local users
+					// Throw out local users - I'm not sure why, but SharpHound skips these
+					// in UserRightsAssignmentProcessor.cs
 					continue
 				}
 

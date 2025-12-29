@@ -84,6 +84,8 @@ Then run the steps as desired. For a `DCOnly` collection, just run `Ctrl+l`, che
 
 * The `--remote-*` arguments can be used to specify a separate set of credentials for remote collection. If you don't specify these credentials, FlashIngestor will try to use the same credentials for the user provided in the standard ingestion arguments (`--user`, `--password`, etc).
 
+A local user can also be used for remote collection by specifying `--user Administrator@.`, for example, but the effectiveness of this approach will depend on whether the account is the built-in administrator or not, and on the values of the `FilterAdministratorToken` / `LocalAccountTokenFilterPolicy` registry keys. For more detail on this behavior, refer to [Pass-the-Hash Is Dead: Long Live LocalAccountTokenFilterPolicy](https://specterops.io/blog/2017/03/16/pass-the-hash-is-dead-long-live-localaccounttokenfilterpolicy/)
+
 ## Customization
 
 * The default queries in the provided `config.yaml` (and hardcoded in the code for the case in which no config file is present) are designed with information needed by Bloodhound conversion in mind. You may choose to customize queries or attributes in `config.yaml`, but it's best to try to avoid removing needed attributes, and to avoid changing the meaning of the search filters.

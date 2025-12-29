@@ -2,8 +2,6 @@ package bloodhound
 
 import (
 	"context"
-	"fmt"
-	"os"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
 	"github.com/Macmod/flashingestor/msrpc"
@@ -39,13 +37,13 @@ func (rc *RemoteCollector) collectEnterpriseCARegistryData(ctx context.Context, 
 		return result
 	}
 
-	fmt.Fprintf(os.Stderr, "RegEnrollPerms\n")
+	//fmt.Fprintf(os.Stderr, "RegEnrollPerms\n")
 	result.CASecurity = certAbuse.ProcessRegistryEnrollmentPermissions(ctx, caName, targetHostname, objectSid, targetDomain)
-	fmt.Fprintf(os.Stderr, "ProcessEAPerms\n")
+	//fmt.Fprintf(os.Stderr, "ProcessEAPerms\n")
 	result.EnrollmentAgentRestrictions = certAbuse.ProcessEAPermissions(ctx, caName, targetHostname, objectSid, targetDomain)
-	fmt.Fprintf(os.Stderr, "IsUserSpecifiesSanEnabled\n")
+	//fmt.Fprintf(os.Stderr, "IsUserSpecifiesSanEnabled\n")
 	result.IsUserSpecifiesSanEnabled = certAbuse.IsUserSpecifiesSanEnabled(caName)
-	fmt.Fprintf(os.Stderr, "IsRoleSeparationEnabled\n")
+	//fmt.Fprintf(os.Stderr, "IsRoleSeparationEnabled\n")
 	result.IsRoleSeparationEnabled = certAbuse.IsRoleSeparationEnabled(caName)
 
 	return result
@@ -76,9 +74,9 @@ func (rc *RemoteCollector) CollectRemoteEnterpriseCA(ctx context.Context, target
 	}
 
 	if rc.RuntimeOptions.IsMethodEnabled("caregistry") {
-		fmt.Fprintf(os.Stderr, "[blue]🛠️  Collecting Enterprise CA registry data from %s (%s)[-]\n", target.DNSHostName, target.IPAddress)
+		//fmt.Fprintf(os.Stderr, "[blue]🛠️  Collecting Enterprise CA registry data from %s (%s)[-]\n", target.DNSHostName, target.IPAddress)
 		result.CARegistryData = rc.collectEnterpriseCARegistryData(ctx, target.CAName, targetHost, objectSid, target.Domain)
-		fmt.Fprintf(os.Stderr, "[blue]🛠️  Collecting HTTPEnrollmentEndpoints CA registry data from %s (%s)[-]\n", target.DNSHostName, target.IPAddress)
+		//fmt.Fprintf(os.Stderr, "[blue]🛠️  Collecting HTTPEnrollmentEndpoints CA registry data from %s (%s)[-]\n", target.DNSHostName, target.IPAddress)
 		result.HttpEnrollmentEndpoints = rc.collectHttpEnrollmentEndpoints(ctx, target.CAName, targetHost)
 	}
 	return result

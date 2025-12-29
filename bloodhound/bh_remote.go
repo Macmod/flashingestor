@@ -856,6 +856,35 @@ func (bh *BH) collectComputerData(spinner *ui.Spinner, computers []CollectionTar
 	}
 }
 
+func (bh *BH) checkAnyRpcSuccess(result RemoteCollectionResult) bool {
+	// Kind of a hacky way to check if "any relevant call succeeded"
+	// but for now it works :)
+	if result.Sessions.Collected == true ||
+		result.PrivilegedSessions.Collected == true ||
+		result.RegistrySessions.Collected == true ||
+		result.NTLMRegistryData.Collected == true ||
+		result.IsWebClientRunning.Collected == true ||
+		result.DCRegistryData.CertificateMappingMethods != nil ||
+		result.DCRegistryData.StrongCertificateBindingEnforcement != nil ||
+		result.DCRegistryData.VulnerableNetlogonSecurityDescriptor != nil {
+		return true
+	}
+
+	if result.UserRights != nil && len(result.UserRights) > 0 {
+		if result.UserRights[0].Collected == true {
+			return true
+		}
+	}
+
+	if result.LocalGroups != nil && len(result.LocalGroups) > 0 {
+		if result.LocalGroups[0].Collected == true {
+			return true
+		}
+	}
+
+	return false
+}
+
 // processComputerResults handles result processing from collection workers
 func (bh *BH) processComputerResults(resultChan chan struct {
 	sid    string
@@ -888,10 +917,8 @@ func (bh *BH) processComputerResults(resultChan chan struct {
 		}
 
 		// Count successes
-		if res.result.LocalGroups != nil && len(res.result.LocalGroups) > 0 {
-			if res.result.LocalGroups[0].Collected {
-				*successCount++
-			}
+		if bh.checkAnyRpcSuccess(res.result) {
+			*successCount++
 		}
 
 		// Progress reporting
