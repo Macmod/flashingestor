@@ -161,44 +161,26 @@ func (s *Spinner) updateSpinners() {
 		return
 	}
 
-	spin := SpinnerFrames[s.spinnerIndex%len(SpinnerFrames)]
+	// Capture the spinner index for this update cycle
+	spinIdx := s.spinnerIndex
 	s.spinnerIndex++
-	status := fmt.Sprintf("[blue]%s Running", spin)
-
-	// Collect updates per domain
-	type update struct {
-		table *tview.Table
-		rows  []int
-	}
-	updates := make([]update, 0)
-
-	for domain, domainRows := range s.runningRows {
-		if len(domainRows) == 0 {
-			continue
-		}
-
-		table, ok := s.tables[domain]
-		if !ok {
-			continue
-		}
-
-		rows := make([]int, 0, len(domainRows))
-		for row := range domainRows {
-			rows = append(rows, row)
-		}
-
-		updates = append(updates, update{table: table, rows: rows})
-	}
 	s.mutex.Unlock()
 
-	// Apply updates outside the mutex
-	if len(updates) > 0 {
-		go s.app.QueueUpdateDraw(func() {
-			for _, upd := range updates {
-				for _, row := range upd.rows {
-					upd.table.GetCell(row, s.statusColumn).SetText(status)
-				}
+	s.app.QueueUpdateDraw(func() {
+		s.mutex.RLock()
+		defer s.mutex.RUnlock()
+
+		spin := SpinnerFrames[spinIdx%len(SpinnerFrames)]
+		status := fmt.Sprintf("[blue]%s Running", spin)
+
+		for domain, domainRows := range s.runningRows {
+			table, ok := s.tables[domain]
+			if !ok {
+				continue
 			}
-		})
-	}
+			for row := range domainRows {
+				table.GetCell(row, s.statusColumn).SetText(status)
+			}
+		}
+	})
 }

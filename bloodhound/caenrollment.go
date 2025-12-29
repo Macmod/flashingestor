@@ -179,8 +179,13 @@ func (p *CAEnrollmentProcessor) getNtlmEndpoint(
 		}
 	}
 
+	// Create dialer with custom resolver from auth
+	dialer := p.auth.Dialer(config.HTTP_TIMEOUT)
+
 	// Create HTTP transport with appropriate TLS config
-	transport := &http.Transport{}
+	transport := &http.Transport{
+		DialContext: dialer.DialContext,
+	}
 	if parsedURL.Scheme == "https" {
 		// For HTTPS, configure TLS
 		// Note: If useBadChannelBinding is true, we want to test if the server
