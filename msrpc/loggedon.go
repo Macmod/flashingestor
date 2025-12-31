@@ -44,8 +44,13 @@ func (m *MSRPC) GetLoggedOnUsers(ctx context.Context) ([]LoggedOnUser, error) {
 
 	loggedOnUsers := make([]LoggedOnUser, 0)
 
-	if resp != nil {
-		for _, user := range resp.UserInfo.WorkstationUserInfo.Value.(*wkssvc.WorkstationUserInfo_Level1).Level1.Buffer {
+	if resp != nil && resp.UserInfo != nil && resp.UserInfo.WorkstationUserInfo != nil && resp.UserInfo.WorkstationUserInfo.Value != nil {
+		level1, ok := resp.UserInfo.WorkstationUserInfo.Value.(*wkssvc.WorkstationUserInfo_Level1)
+		if !ok || level1 == nil || level1.Level1 == nil {
+			return loggedOnUsers, nil
+		}
+
+		for _, user := range level1.Level1.Buffer {
 			if user == nil {
 				continue
 			}

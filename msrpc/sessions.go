@@ -47,8 +47,13 @@ func (m *MSRPC) GetSessions(ctx context.Context) ([]Session, error) {
 		return nil, fmt.Errorf("NetSessionEnum failed: %w", err)
 	}
 
-	if resp != nil {
-		for _, session := range resp.Info.SessionInfo.Value.(*srvsvc.SessionEnumUnion_Level10).Level10.Buffer {
+	if resp != nil && resp.Info != nil && resp.Info.SessionInfo != nil && resp.Info.SessionInfo.Value != nil {
+		level10, ok := resp.Info.SessionInfo.Value.(*srvsvc.SessionEnumUnion_Level10)
+		if !ok || level10 == nil || level10.Level10 == nil {
+			return sessions, nil
+		}
+
+		for _, session := range level10.Level10.Buffer {
 			sessions = append(sessions, Session{
 				ClientName: session.ClientName,
 				UserName:   session.UserName,

@@ -75,7 +75,10 @@ func BuildWellKnownGroup(sid, name string, domainName string, domainSID string) 
 
 	// Enterprise Domain Controllers group includes all DCs from this domain
 	if name == "Enterprise Domain Controllers" && domainName != "" {
-		if dcs, ok := BState().DomainControllers[domainSID]; ok {
+		BState().domainControllersMu.RLock()
+		dcs, ok := BState().DomainControllers[domainSID]
+		BState().domainControllersMu.RUnlock()
+		if ok {
 			members = append(members, dcs...)
 		}
 	}

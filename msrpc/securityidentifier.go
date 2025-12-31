@@ -112,6 +112,11 @@ func (m *MSRPC) LookupSids(sids []string) ([]ResolvedSID, error) {
 	}
 
 	for _, name := range lookupResp.TranslatedNames.Names {
+		if len(lookupResp.ReferencedDomains.Domains) <= int(name.DomainIndex) {
+			// Should never happen, but just to be safe
+			continue
+		}
+
 		domain := lookupResp.ReferencedDomains.Domains[name.DomainIndex]
 		domainNetbios := domain.Name.Buffer
 		domainSID := SID{domain.SID}

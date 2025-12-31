@@ -16,7 +16,8 @@ import (
 // This is a singleton accessed via BState().
 type State struct {
 	DomainControllers      map[string][]TypedPrincipal // Map of domain SID -> list of DCs
-	ObjectTypeGUIDMap      map[string]string
+	domainControllersMu    sync.RWMutex                // Protects DomainControllers
+	ObjectTypeGUIDMap      sync.Map                    // Thread-safe map[string]string
 	DomainSIDCache         *SimpleCache
 	SIDDomainCache         *SimpleCache
 	MemberCache            *StringCache
@@ -24,7 +25,7 @@ type State struct {
 	HostDnsCache           *StringCache
 	SamCache               *StringCache
 	ChildCache             *ParentChildCache
-	AdminSDHolderHashCache map[string]string
+	AdminSDHolderHashCache sync.Map // Thread-safe map[string]string
 	CertTemplateCache      *StringCache
 	WellKnown              *WellKnownSIDTracker
 	CacheWaitGroup         sync.WaitGroup
@@ -49,9 +50,7 @@ func BState() *State {
 func (st *State) Init() {
 	st.EmptySDCount = 0
 
-	if st.ObjectTypeGUIDMap == nil {
-		st.ObjectTypeGUIDMap = make(map[string]string)
-	}
+	// ObjectTypeGUIDMap and AdminSDHolderHashCache are now sync.Map, no init needed
 
 	if st.DomainSIDCache == nil {
 		st.DomainSIDCache = NewSimpleCache()
@@ -85,9 +84,7 @@ func (st *State) Init() {
 		st.ChildCache = NewParentChildCache(16)
 	}
 
-	if st.AdminSDHolderHashCache == nil {
-		st.AdminSDHolderHashCache = make(map[string]string)
-	}
+	// AdminSDHolderHashCache is now sync.Map, no init needed
 
 	if st.CertTemplateCache == nil {
 		st.CertTemplateCache = NewCache(2)
@@ -175,6 +172,7 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 				// Get domain SID from entry
 				domainSID, err := entry.GetDomainSID()
 				if err == nil && domainSID != "" {
+					st.domainControllersMu.Lock()
 					if st.DomainControllers[domainSID] == nil {
 						st.DomainControllers[domainSID] = make([]TypedPrincipal, 0)
 					}
@@ -182,6 +180,7 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 						ObjectIdentifier: entry.GetSID(),
 						ObjectType:       "computer",
 					})
+					st.domainControllersMu.Unlock()
 				}
 			}
 		} else if identifier == "domains" {
@@ -217,7 +216,7 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 						log <- fmt.Sprintf("❌ Error calculating AdminSDHolder ACL hash for %s: %v", domainName, err)
 					} else if aclHash != "" {
 						// Store the hash indexed by domain name
-						st.AdminSDHolderHashCache[domainName] = aclHash
+						st.AdminSDHolderHashCache.Store(domainName, aclHash)
 						log <- fmt.Sprintf("🔒 Cached AdminSDHolder ACL hash for domain \"%s\"", domainName)
 					}
 				}
@@ -252,8 +251,14 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 
 // ClearCache clears all cached data and resets the state
 func (st *State) Clear() {
+	st.domainControllersMu.Lock()
 	st.DomainControllers = make(map[string][]TypedPrincipal, 0)
-	st.ObjectTypeGUIDMap = make(map[string]string)
+	st.domainControllersMu.Unlock()
+
+	// Clear sync.Maps by creating new instances
+	st.ObjectTypeGUIDMap = sync.Map{}
+	st.AdminSDHolderHashCache = sync.Map{}
+
 	st.DomainSIDCache = NewSimpleCache()
 	st.SIDDomainCache = NewSimpleCache()
 	st.MemberCache = NewCache(16)
@@ -261,7 +266,6 @@ func (st *State) Clear() {
 	st.HostDnsCache = NewCache(16)
 	st.SamCache = NewCache(16)
 	st.ChildCache = NewParentChildCache(16)
-	st.AdminSDHolderHashCache = make(map[string]string)
 	st.CertTemplateCache = NewCache(16)
 	st.loadedCaches = make(map[string]bool)
 }

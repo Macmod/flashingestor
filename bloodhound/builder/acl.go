@@ -245,7 +245,10 @@ func ParseBinaryACL(entryType string, hasLAPS bool, aclData []byte) ([]ACE, bool
 		//hasObjectTypePresent := (a.Header.Flags.RawValue & flags.ACCESS_CONTROL_OBJECT_TYPE_FLAG_OBJECT_TYPE_PRESENT) != 0
 		//hasInheritedObjectTypePresent := (a.Header.Flags.RawValue & flags.ACCESS_CONTROL_OBJECT_TYPE_FLAG_INHERITED_OBJECT_TYPE_PRESENT) != 0
 
-		entryTypeGUID := BState().ObjectTypeGUIDMap[entryType]
+		var entryTypeGUID string
+		if val, ok := BState().ObjectTypeGUIDMap.Load(entryType); ok {
+			entryTypeGUID = val.(string)
+		}
 		inheritedObjectTypeGUID := a.AccessControlObjectType.InheritedObjectType.GUID.ToFormatD()
 		isAceInheritedFromCurrentType := isInherited && (strings.EqualFold(inheritedObjectTypeGUID, entryTypeGUID) || strings.EqualFold(inheritedObjectTypeGUID, ACEGuids["AllGuid"]))
 		// Special case for Exchange (?)
@@ -331,9 +334,13 @@ func ParseBinaryACL(entryType string, hasLAPS bool, aclData []byte) ([]ACE, bool
 						ACEs = append(ACEs, newACE("AllExtendedRights", sidStr, isInherited, inheritanceHash, isPermissionForOwnerRightsSid, isInheritedPermissionForOwnerRightsSid))
 					} else {
 						objType := a.AccessControlObjectType.ObjectType.GUID.ToFormatD()
-						if strings.EqualFold(objType, BState().ObjectTypeGUIDMap["ms-mcs-admpwd"]) ||
-							strings.EqualFold(objType, BState().ObjectTypeGUIDMap["ms-laps-password"]) ||
-							strings.EqualFold(objType, BState().ObjectTypeGUIDMap["ms-laps-encryptedpassword"]) {
+						mcsGUID, _ := BState().ObjectTypeGUIDMap.Load("ms-mcs-admpwd")
+						lapsGUID, _ := BState().ObjectTypeGUIDMap.Load("ms-laps-password")
+						encryptedGUID, _ := BState().ObjectTypeGUIDMap.Load("ms-laps-encryptedpassword")
+
+						if (mcsGUID != nil && strings.EqualFold(objType, mcsGUID.(string))) ||
+							(lapsGUID != nil && strings.EqualFold(objType, lapsGUID.(string))) ||
+							(encryptedGUID != nil && strings.EqualFold(objType, encryptedGUID.(string))) {
 							ACEs = append(ACEs, newACE("ReadLAPSPassword", sidStr, isInherited, inheritanceHash, isPermissionForOwnerRightsSid, isInheritedPermissionForOwnerRightsSid))
 						}
 					}

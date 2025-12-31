@@ -752,7 +752,7 @@ func (bh *BH) LoadSchemaInfo(progressCallback func(count, total int)) {
 			schemaIDGUID := entry.GetAttrRawVal("schemaIDGUID", []byte{})
 			guidStr := gildap.BytesToGUID(schemaIDGUID)
 
-			builder.BState().ObjectTypeGUIDMap[strings.ToLower(name)] = guidStr
+			builder.BState().ObjectTypeGUIDMap.Store(strings.ToLower(name), guidStr)
 
 			processedCount++
 

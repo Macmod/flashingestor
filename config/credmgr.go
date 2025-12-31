@@ -38,10 +38,17 @@ func (a *CredentialMgr) Kerberos() bool {
 }
 
 func (a *CredentialMgr) Dialer(timeout time.Duration) *net.Dialer {
-	return &net.Dialer{
-		Timeout:  timeout,
-		Resolver: a.credential.Resolver.(*net.Resolver),
+	dialer := &net.Dialer{
+		Timeout: timeout,
 	}
+
+	if a.credential != nil && a.credential.Resolver != nil {
+		if resolver, ok := a.credential.Resolver.(*net.Resolver); ok {
+			dialer.Resolver = resolver
+		}
+	}
+
+	return dialer
 }
 
 func (a *CredentialMgr) NewTarget(protocol string, targetHost string) *adauth.Target {

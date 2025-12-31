@@ -564,9 +564,12 @@ func (bh *BH) loadComputerTargets(spinner *ui.Spinner) []CollectionTarget {
 
 	// Start result collector goroutine
 	done := make(chan struct{})
+	var targetsMu sync.Mutex
 	go func() {
 		for result := range results {
+			targetsMu.Lock()
 			targets = append(targets, result)
+			targetsMu.Unlock()
 		}
 		close(done)
 	}()

@@ -35,7 +35,8 @@ func BuildUserFromEntry(entry *gildap.LDAPEntry) (*User, bool) {
 	// Check AdminSDHolder protection
 	adminSDHolderProtected := false
 	securityDescriptor := entry.GetAttrRawVal("nTSecurityDescriptor", []byte{})
-	if adminHash, ok := BState().AdminSDHolderHashCache[baseProps.Domain]; ok && len(securityDescriptor) > 0 {
+	if adminHashVal, ok := BState().AdminSDHolderHashCache.Load(baseProps.Domain); ok && len(securityDescriptor) > 0 {
+		adminHash := adminHashVal.(string)
 		isProtected, err := IsAdminSDHolderProtected(securityDescriptor, adminHash, userName)
 		if err == nil {
 			adminSDHolderProtected = isProtected
@@ -134,9 +135,11 @@ func BuildUserFromEntry(entry *gildap.LDAPEntry) (*User, bool) {
 			port := 1433
 			if strings.Contains(spn, ":") {
 				splitSPN := strings.SplitN(spn, ":", 2)
-				_, err := fmt.Sscanf(splitSPN[1], "%d", &port)
-				if err != nil {
-					port = 1433
+				if len(splitSPN) == 2 {
+					_, err := fmt.Sscanf(splitSPN[1], "%d", &port)
+					if err != nil {
+						port = 1433
+					}
 				}
 			}
 

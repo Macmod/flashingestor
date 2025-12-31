@@ -60,7 +60,8 @@ func BuildGroupFromEntry(entry *gildap.LDAPEntry) (*Group, bool) {
 	// Check AdminSDHolder protection
 	adminSDHolderProtected := false
 	securityDescriptor := entry.GetAttrRawVal("nTSecurityDescriptor", []byte{})
-	if adminHash, ok := BState().AdminSDHolderHashCache[baseProps.Domain]; ok && len(securityDescriptor) > 0 {
+	if adminHashVal, ok := BState().AdminSDHolderHashCache.Load(baseProps.Domain); ok && len(securityDescriptor) > 0 {
+		adminHash := adminHashVal.(string)
 		isProtected, err := IsAdminSDHolderProtected(securityDescriptor, adminHash, groupName)
 		if err == nil {
 			adminSDHolderProtected = isProtected

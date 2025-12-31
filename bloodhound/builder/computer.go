@@ -63,7 +63,8 @@ func BuildComputerFromEntry(entry *gildap.LDAPEntry) (*Computer, bool) {
 	// Check AdminSDHolder protection
 	adminSDHolderProtected := false
 	securityDescriptor := entry.GetAttrRawVal("nTSecurityDescriptor", []byte{})
-	if adminHash, ok := BState().AdminSDHolderHashCache[baseProps.Domain]; ok && len(securityDescriptor) > 0 {
+	if adminHashVal, ok := BState().AdminSDHolderHashCache.Load(baseProps.Domain); ok && len(securityDescriptor) > 0 {
+		adminHash := adminHashVal.(string)
 		isProtected, err := IsAdminSDHolderProtected(securityDescriptor, adminHash, strings.ToUpper(compName))
 		if err == nil {
 			adminSDHolderProtected = isProtected

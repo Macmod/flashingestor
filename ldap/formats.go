@@ -27,9 +27,13 @@ func HexToDecimalString(hex string) (decimal string) {
 }
 
 func ConvertSID(hexSID string) (SID string) {
+	if len(hexSID) < 16 {
+		return ""
+	}
+
 	var fields []string
 	fields = append(fields, hexSID[0:2])
-	if fields[0] == "01" {
+	if len(fields) > 0 && fields[0] == "01" {
 		fields[0] = "S-1"
 	}
 	numDashes, _ := strconv.Atoi(HexToDecimalString(hexSID[2:4]))
@@ -38,6 +42,9 @@ func ConvertSID(hexSID string) (SID string) {
 
 	lower, upper := 16, 24
 	for i := 1; i <= numDashes; i++ {
+		if upper > len(hexSID) {
+			break
+		}
 		fields = append(fields, "-"+HexToDecimalString(EndianConvert(hexSID[lower:upper])))
 		lower += 8
 		upper += 8
@@ -60,6 +67,10 @@ func BytesToGUID(b []byte) string {
 }
 
 func ConvertGUID(portion string) string {
+	if len(portion) < 32 {
+		return ""
+	}
+
 	portion1 := EndianConvert(portion[0:8])
 	portion2 := EndianConvert(portion[8:12])
 	portion3 := EndianConvert(portion[12:16])
