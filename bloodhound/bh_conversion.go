@@ -379,6 +379,15 @@ func (bh *BH) ProcessDomain(progressCallback func(count, total int)) {
 
 	domainEntries, _ := os.ReadDir(bh.LdapFolder)
 
+	// Calculate total entries across all domain directories
+	totalInFiles := 0
+	type domainReaderInfo struct {
+		domainName string
+		reader     *reader.MPReader
+		trusts     []gildap.LDAPEntry
+	}
+	domainReaders := make([]domainReaderInfo, 0)
+
 	for _, domainEntry := range domainEntries {
 		if !domainEntry.IsDir() {
 			continue
@@ -402,34 +411,42 @@ func (bh *BH) ProcessDomain(progressCallback func(count, total int)) {
 			continue
 		}
 
-		processedCount := 0
+		totalInFiles += totalInFile
+		domainReaders = append(domainReaders, domainReaderInfo{
+			domainName: domainEntry.Name(),
+			reader:     domainsReader,
+			trusts:     trusts,
+		})
+	}
 
-		originalEntry := new(ldap.Entry)
-		var entry gildap.LDAPEntry
+	processedCount := 0
+	originalEntry := new(ldap.Entry)
+	var entry gildap.LDAPEntry
 
-		if progressCallback != nil {
-			progressCallback(0, totalInFile)
-		}
+	if progressCallback != nil {
+		progressCallback(0, totalInFiles)
+	}
 
-		for i := 0; i < domainsReader.Length(); i++ {
+	for _, info := range domainReaders {
+		for i := 0; i < info.reader.Length(); i++ {
 			if bh.IsAborted() {
 				return
 			}
 
 			*originalEntry = ldap.Entry{}
-			if err := domainsReader.ReadEntry(originalEntry); err != nil {
+			if err := info.reader.ReadEntry(originalEntry); err != nil {
 				bh.Log <- "❌ Error decoding domain: " + err.Error()
 				continue
 			}
 
 			entry.Init(originalEntry)
 
-			domain := builder.BuildDomainFromEntry(&entry, trusts)
+			domain := builder.BuildDomainFromEntry(&entry, info.trusts)
 			domainWriter.Add(domain)
 
 			processedCount++
 			if progressCallback != nil {
-				progressCallback(processedCount, totalInFile)
+				progressCallback(processedCount, totalInFiles)
 			}
 		}
 
@@ -555,6 +572,9 @@ func (bh *BH) ProcessConfiguration(progressCallback func(count, total int)) {
 
 	configPaths, _ := bh.GetPaths("configuration")
 
+	// Calculate total entries across all files
+	totalInFiles := 0
+	readers := make([]*reader.MPReader, 0, len(configPaths))
 	for _, configPath := range configPaths {
 		mpReader, err := reader.NewMPReader(configPath)
 		if err != nil {
@@ -568,18 +588,22 @@ func (bh *BH) ProcessConfiguration(progressCallback func(count, total int)) {
 			bh.Log <- "❌ Error reading length of configuration file: " + err.Error()
 			continue
 		}
+		totalInFiles += totalInFile
+		readers = append(readers, mpReader)
+	}
 
-		processedCount := 0
-		batchCount := 0
-		const progressInterval = 50
+	processedCount := 0
+	batchCount := 0
+	const progressInterval = 50
 
-		originalEntry := new(ldap.Entry)
-		var entry gildap.LDAPEntry
+	originalEntry := new(ldap.Entry)
+	var entry gildap.LDAPEntry
 
-		if progressCallback != nil {
-			progressCallback(0, totalInFile)
-		}
+	if progressCallback != nil {
+		progressCallback(0, totalInFiles)
+	}
 
+	for _, mpReader := range readers {
 		for i := 0; i < mpReader.Length(); i++ {
 			if bh.IsAborted() {
 				return
@@ -600,7 +624,7 @@ func (bh *BH) ProcessConfiguration(progressCallback func(count, total int)) {
 
 			if batchCount >= progressInterval {
 				if progressCallback != nil {
-					progressCallback(processedCount, totalInFile)
+					progressCallback(processedCount, totalInFiles)
 				}
 				batchCount = 0
 			}
@@ -609,10 +633,10 @@ func (bh *BH) ProcessConfiguration(progressCallback func(count, total int)) {
 		if bh.IsAborted() {
 			return
 		}
+	}
 
-		if progressCallback != nil {
-			progressCallback(processedCount, totalInFile)
-		}
+	if progressCallback != nil {
+		progressCallback(processedCount, totalInFiles)
 	}
 }
 
@@ -712,6 +736,9 @@ func (bh *BH) LoadSchemaInfo(progressCallback func(count, total int)) {
 
 	schemaPaths, _ := bh.GetPaths("schema")
 
+	// Calculate total entries across all files
+	totalInFiles := 0
+	readers := make([]*reader.MPReader, 0, len(schemaPaths))
 	for _, schemaPath := range schemaPaths {
 		mpReader, err := reader.NewMPReader(schemaPath)
 		if err != nil {
@@ -725,16 +752,19 @@ func (bh *BH) LoadSchemaInfo(progressCallback func(count, total int)) {
 			bh.Log <- "❌ Error reading length of schema file: " + err.Error()
 			continue
 		}
+		totalInFiles += totalInFile
+		readers = append(readers, mpReader)
+	}
 
-		processedCount := 0
+	processedCount := 0
+	originalEntry := new(ldap.Entry)
+	var entry gildap.LDAPEntry
 
-		originalEntry := new(ldap.Entry)
-		var entry gildap.LDAPEntry
+	if progressCallback != nil {
+		progressCallback(0, totalInFiles)
+	}
 
-		if progressCallback != nil {
-			progressCallback(0, totalInFile)
-		}
-
+	for _, mpReader := range readers {
 		for i := 0; i < mpReader.Length(); i++ {
 			if bh.IsAborted() {
 				return
@@ -757,7 +787,7 @@ func (bh *BH) LoadSchemaInfo(progressCallback func(count, total int)) {
 			processedCount++
 
 			if progressCallback != nil {
-				progressCallback(processedCount, totalInFile)
+				progressCallback(processedCount, totalInFiles)
 			}
 		}
 	}
