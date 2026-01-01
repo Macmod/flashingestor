@@ -21,18 +21,12 @@ import (
 // including enrollment permissions and related abuse vectors.
 type CertAbuseProcessor struct {
 	domain   string
-	msrpcObj *msrpc.MSRPC
+	msrpcObj *msrpc.WinregRPC
 	auth     *config.CredentialMgr
 }
 
 // NewCertAbuseProcessor creates a processor for the specified domain.
-// Returns nil if the WinReg client binding fails.
-func NewCertAbuseProcessor(domain string, msrpcObj *msrpc.MSRPC, auth *config.CredentialMgr) *CertAbuseProcessor {
-	err := msrpcObj.BindWinregClient()
-	if err != nil {
-		return nil
-	}
-
+func NewCertAbuseProcessor(domain string, msrpcObj *msrpc.WinregRPC, auth *config.CredentialMgr) *CertAbuseProcessor {
 	return &CertAbuseProcessor{
 		domain:   domain,
 		msrpcObj: msrpcObj,
@@ -379,20 +373,14 @@ func (cap *CertAbuseProcessor) getRegistryPrincipal(
 func (cap *CertAbuseProcessor) getMachineSid(ctx context.Context, computerName string, computerObjectId string) string {
 	// TODO: Check a cache first using computerObjectId
 
-	rpcObj, err := msrpc.NewMSRPC(ctx, computerName, cap.auth)
+	rpcObj, err := msrpc.NewSamrRPC(ctx, computerName, cap.auth)
 	defer rpcObj.Close()
 	if err != nil {
 		//fmt.Fprintf(os.Stderr, "err: %v\n", err)
 		return ""
 	}
 
-	err = rpcObj.BindSamrClient()
-	if err != nil {
-		//fmt.Fprintf(os.Stderr, "err: %v\n", err)
-		return ""
-	}
-
-	resp, err := rpcObj.Client.(samr.SamrClient).Connect(ctx, &samr.ConnectRequest{
+	resp, err := rpcObj.Client.Connect(ctx, &samr.ConnectRequest{
 		ServerName:    string(computerName),
 		DesiredAccess: 0x01 | 0x10 | 0x20,
 	})

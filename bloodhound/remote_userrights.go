@@ -18,7 +18,7 @@ func GetRID(sid string) string {
 
 // collectUserRights retrieves user rights assignments from a target system via LSA RPC
 func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp string, targetHost string, machineSid string, isDC bool, domain string) []builder.UserRightsAPIResult {
-	rpcObj, err := msrpc.NewMSRPC(ctx, targetIp, rc.auth)
+	rpcObj, err := msrpc.NewLsadRPC(ctx, targetIp, rc.auth)
 
 	if err != nil {
 		errStr := fmt.Sprint(err)
@@ -29,14 +29,6 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 	}
 
 	defer rpcObj.Close()
-
-	if err := rpcObj.BindLsadClient(); err != nil {
-		errStr := fmt.Sprint(err)
-		result := builder.UserRightsAPIResult{
-			APIResult: builder.APIResult{Collected: false, FailureReason: &errStr},
-		}
-		return []builder.UserRightsAPIResult{result}
-	}
 
 	desiredPrivileges := []string{
 		"SeRemoteInteractiveLogonRight",
@@ -102,7 +94,14 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 			if strings.HasPrefix(principalSid, machineSid+"-") {
 				newSid := fmt.Sprintf("%s-%s", machineSid, GetRID(principalSid))
 
-				resolvedSids, err := rpcObj.LookupSids([]string{principalSid})
+				// Need LsatRPC for SID lookup
+				lsatObj, err := msrpc.NewLsatRPC(ctx, targetIp, rc.auth)
+				if err != nil {
+					continue
+				}
+				defer lsatObj.Close()
+
+				resolvedSids, err := lsatObj.LookupSids([]string{principalSid})
 				if err != nil || len(resolvedSids) != 1 {
 					//fmt.Fprintf(os.Stderr, "Failed to lookup SID %s: %v\n", principalSid, err)
 					continue

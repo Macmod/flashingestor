@@ -7,16 +7,11 @@ import (
 	lsad "github.com/oiweiwei/go-msrpc/msrpc/lsad/lsarpc/v0"
 )
 
-func (m *MSRPC) GetUserRightsAssignments(privileges []string) (map[string][]string, error) {
+func (m *LsadRPC) GetUserRightsAssignments(privileges []string) (map[string][]string, error) {
 	results := make(map[string][]string)
 
-	client, ok := m.Client.(lsad.LsarpcClient)
-	if !ok {
-		return nil, fmt.Errorf("lsad client type assertion failed")
-	}
-
 	// Open LSA Policy
-	lsaConResp, err := client.OpenPolicy2(m.Context, &lsad.OpenPolicy2Request{
+	lsaConResp, err := m.Client.OpenPolicy2(m.Context, &lsad.OpenPolicy2Request{
 		DesiredAccess: dtyp.AccessMaskGenericRead | dtyp.AccessMaskGenericExecute,
 	})
 	if err != nil {
@@ -28,7 +23,7 @@ func (m *MSRPC) GetUserRightsAssignments(privileges []string) (map[string][]stri
 	// Enumerate accounts for each privilege
 	for _, privilege := range privileges {
 		// Enumerate accounts with this privilege
-		enumResp, err := client.EnumerateAccountsWithUserRight(m.Context, &lsad.EnumerateAccountsWithUserRightRequest{
+		enumResp, err := m.Client.EnumerateAccountsWithUserRight(m.Context, &lsad.EnumerateAccountsWithUserRightRequest{
 			Policy:    handle,
 			UserRight: &dtyp.UnicodeString{Buffer: privilege},
 		})

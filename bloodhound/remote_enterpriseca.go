@@ -26,13 +26,13 @@ type EnterpriseCACollectionTarget struct {
 func (rc *RemoteCollector) collectEnterpriseCARegistryData(ctx context.Context, caName string, targetHostname string, objectSid string, targetDomain string) builder.CARegistryData {
 	result := builder.CARegistryData{}
 
-	msrpcObj, err := msrpc.NewMSRPC(ctx, targetHostname, rc.auth)
+	msrpcObj, err := msrpc.NewWinregRPC(ctx, targetHostname, rc.auth)
 	if err != nil {
 		return result
 	}
 	defer msrpcObj.Close()
 
-	certAbuse := NewCertAbuseProcessor(targetDomain, &msrpcObj, rc.auth)
+	certAbuse := NewCertAbuseProcessor(targetDomain, msrpcObj, rc.auth)
 	if certAbuse == nil {
 		return result
 	}

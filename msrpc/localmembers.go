@@ -1,10 +1,12 @@
 package msrpc
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/oiweiwei/go-msrpc/msrpc/dtyp"
+	"github.com/oiweiwei/go-msrpc/msrpc/erref/ntstatus"
 	"github.com/oiweiwei/go-msrpc/msrpc/samr/samr/v1"
 )
 
@@ -15,15 +17,10 @@ type GroupAlias struct {
 	Members    []string
 }
 
-func (m *MSRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
-	client, ok := m.Client.(samr.SamrClient)
-	if !ok {
-		return nil, fmt.Errorf("samr client type assertion failed")
-	}
-
+func (m *SamrRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 	groupAliases := make([]GroupAlias, 0)
 
-	samrConResp, err := client.Connect(m.Context, &samr.ConnectRequest{
+	samrConResp, err := m.Client.Connect(m.Context, &samr.ConnectRequest{
 		DesiredAccess: dtyp.AccessMaskGenericRead | dtyp.AccessMaskGenericExecute | dtyp.AccessMaskAccessSystemSecurity,
 	})
 
@@ -43,7 +40,7 @@ func (m *MSRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 			continue
 		}
 
-		lookupResp, err := client.LookupDomainInSAMServer(m.Context, &samr.LookupDomainInSAMServerRequest{
+		lookupResp, err := m.Client.LookupDomainInSAMServer(m.Context, &samr.LookupDomainInSAMServerRequest{
 			Server: handle,
 			Name:   domain.Name,
 		})
@@ -52,7 +49,7 @@ func (m *MSRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 			continue
 		}
 
-		domainResp, err := client.OpenDomain(m.Context, &samr.OpenDomainRequest{
+		domainResp, err := m.Client.OpenDomain(m.Context, &samr.OpenDomainRequest{
 			Server:        handle,
 			DomainID:      lookupResp.DomainID,
 			DesiredAccess: 0x00000200 | dtyp.AccessMaskMaximumAllowed,
@@ -62,7 +59,7 @@ func (m *MSRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 			continue
 		}
 
-		aliases, err := m.enumerateAliasesInDomain(client, domainResp.Domain)
+		aliases, err := m.enumerateAliasesInDomain(domainResp.Domain)
 		if err != nil {
 			//return nil, fmt.Errorf("EnumerateAliasesInDomain failed: %w", err)
 			continue
@@ -71,7 +68,7 @@ func (m *MSRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 		for _, alias := range aliases {
 			localGroupMembers := make([]string, 0)
 
-			aliasResp, err := client.OpenAlias(m.Context, &samr.OpenAliasRequest{
+			aliasResp, err := m.Client.OpenAlias(m.Context, &samr.OpenAliasRequest{
 				Domain:        domainResp.Domain,
 				DesiredAccess: dtyp.AccessMaskGenericRead | dtyp.AccessMaskMaximumAllowed,
 				AliasID:       alias.RelativeID,
@@ -81,7 +78,7 @@ func (m *MSRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 				continue
 			}
 
-			membersResp, err := client.GetMembersInAlias(m.Context, &samr.GetMembersInAliasRequest{
+			membersResp, err := m.Client.GetMembersInAlias(m.Context, &samr.GetMembersInAliasRequest{
 				AliasHandle: aliasResp.AliasHandle,
 			})
 			if err != nil || membersResp == nil || membersResp.Members == nil {
@@ -104,4 +101,54 @@ func (m *MSRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 	}
 
 	return groupAliases, nil
+}
+
+// enumerateDomainsInSAMServer enumerates all domains with pagination
+func (m *SamrRPC) enumerateDomainsInSAMServer(handle *samr.Handle) ([]*samr.RIDEnumeration, error) {
+	var domains []*samr.RIDEnumeration
+
+	for enum := uint32(0); ; {
+		resp, err := m.Client.EnumerateDomainsInSAMServer(m.Context, &samr.EnumerateDomainsInSAMServerRequest{
+			Server:             handle,
+			EnumerationContext: enum,
+		})
+		if err != nil {
+			if !errors.Is(err, ntstatus.StatusMoreEntries) {
+				return nil, err
+			}
+		}
+
+		domains = append(domains, resp.Buffer.Buffer...)
+
+		if enum = resp.EnumerationContext; resp.CountReturned == 0 || enum == 0 {
+			break
+		}
+	}
+
+	return domains, nil
+}
+
+// enumerateAliasesInDomain enumerates all aliases in a domain with pagination
+func (m *SamrRPC) enumerateAliasesInDomain(handle *samr.Handle) ([]*samr.RIDEnumeration, error) {
+	var aliases []*samr.RIDEnumeration
+
+	for enum := uint32(0); ; {
+		resp, err := m.Client.EnumerateAliasesInDomain(m.Context, &samr.EnumerateAliasesInDomainRequest{
+			Domain:             handle,
+			EnumerationContext: enum,
+		})
+		if err != nil {
+			if !errors.Is(err, ntstatus.StatusMoreEntries) {
+				return nil, err
+			}
+		}
+
+		aliases = append(aliases, resp.Buffer.Buffer...)
+
+		if enum = resp.EnumerationContext; resp.CountReturned == 0 || enum == 0 {
+			break
+		}
+	}
+
+	return aliases, nil
 }

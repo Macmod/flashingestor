@@ -122,12 +122,12 @@ func BuildDomainFromEntry(domainEntry *gildap.LDAPEntry, trustEntries []gildap.L
 		Trusts:       []DomainTrust{},
 		Links:        []GPLinkRef{},
 		ChildObjects: []TypedPrincipal{},
-		GPOChanges: GPOChangeSet{
+		GPOChanges: GPOChanges{
 			AffectedComputers:  []TypedPrincipal{},
-			DcomUsers:          []any{},
-			LocalAdmins:        []any{},
-			PSRemoteUsers:      []any{},
-			RemoteDesktopUsers: []any{},
+			DcomUsers:          []TypedPrincipal{},
+			LocalAdmins:        []TypedPrincipal{},
+			PSRemoteUsers:      []TypedPrincipal{},
+			RemoteDesktopUsers: []TypedPrincipal{},
 		},
 	}
 

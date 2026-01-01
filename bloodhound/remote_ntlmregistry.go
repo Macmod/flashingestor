@@ -47,7 +47,7 @@ func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHo
 		},
 	}
 
-	mrpcObj, err := msrpc.NewMSRPC(ctx, targetHost, rc.auth)
+	mrpcObj, err := msrpc.NewWinregRPC(ctx, targetHost, rc.auth)
 	if err != nil {
 		errStr := fmt.Sprintf("RPC failure: %v", err)
 		result.APIResult.Collected = false
@@ -55,13 +55,6 @@ func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHo
 		return result
 	}
 	defer mrpcObj.Close()
-
-	if err := mrpcObj.BindWinregClient(); err != nil {
-		errStr := fmt.Sprintf("Winreg failure: %v", err)
-		result.APIResult.Collected = false
-		result.APIResult.FailureReason = &errStr
-		return result
-	}
 
 	// ClientAllowedNTLMServers - REG_MULTI_SZ
 	valBytes, err := mrpcObj.GetRegistryKeyData(

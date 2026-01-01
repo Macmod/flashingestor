@@ -3,8 +3,6 @@ package reader
 import (
 	"os"
 
-	"iter"
-
 	"github.com/vmihailenco/msgpack"
 )
 
@@ -49,6 +47,15 @@ func (r *MPReader) GetPath() string {
 	return r.file.Name()
 }
 
+func (r *MPReader) Length() int {
+	return r.length
+}
+
+func (r *MPReader) Close() error {
+	return r.file.Close()
+}
+
+/*
 // Entries returns a lazy iterator over all entries. ReadLength must be called first.
 func (r *MPReader) Entries(entryFactory func() interface{}) iter.Seq2[interface{}, error] {
 	return func(yield func(interface{}, error) bool) {
@@ -64,14 +71,7 @@ func (r *MPReader) Entries(entryFactory func() interface{}) iter.Seq2[interface{
 		}
 	}
 }
-
-func (r *MPReader) Length() int {
-	return r.length
-}
-
-func (r *MPReader) Close() error {
-	return r.file.Close()
-}
+*/
 
 /*
 func ReadEntries(file *os.File, batchCallback func(int), entryCallback func(dec *msgpack.Decoder) bool, shouldAbort func() bool) {

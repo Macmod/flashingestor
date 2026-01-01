@@ -250,3 +250,37 @@ func (c *SimpleCache) Get(domainName string) (string, bool) {
 	c.mu.RUnlock()
 	return sid, ok
 }
+
+// GPOCacheEntry stores GPO attributes needed for local group processing
+type GPOCacheEntry struct {
+	GPCFileSysPath string
+	Flags          string
+}
+
+// GPOCache maintains GPO entries indexed by DN
+type GPOCache struct {
+	mu sync.RWMutex
+	m  map[string]*GPOCacheEntry // Maps DN (lowercase) to GPO entry
+}
+
+// NewGPOCache creates a new GPO cache
+func NewGPOCache() *GPOCache {
+	return &GPOCache{
+		m: make(map[string]*GPOCacheEntry),
+	}
+}
+
+// Set stores a GPO entry by its DN (case-insensitive)
+func (c *GPOCache) Set(dn string, entry *GPOCacheEntry) {
+	c.mu.Lock()
+	c.m[strings.ToLower(dn)] = entry
+	c.mu.Unlock()
+}
+
+// Get retrieves a GPO entry by DN (case-insensitive)
+func (c *GPOCache) Get(dn string) (*GPOCacheEntry, bool) {
+	c.mu.RLock()
+	entry, ok := c.m[strings.ToLower(dn)]
+	c.mu.RUnlock()
+	return entry, ok
+}

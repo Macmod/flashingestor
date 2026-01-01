@@ -14,13 +14,8 @@ type Session struct {
 	IdleTime   uint32
 }
 
-func (m *MSRPC) GetSessions(ctx context.Context) ([]Session, error) {
+func (m *SrvsvcRPC) GetSessions(ctx context.Context) ([]Session, error) {
 	sessions := make([]Session, 0)
-
-	client, ok := m.Client.(srvsvc.SrvsvcClient)
-	if !ok {
-		return nil, fmt.Errorf("srvsvc client type assertion failed")
-	}
 
 	info := srvsvc.SessionEnum{
 		Level: 10,
@@ -34,7 +29,7 @@ func (m *MSRPC) GetSessions(ctx context.Context) ([]Session, error) {
 		},
 	}
 
-	resp, err := client.SessionEnum(m.Context, &srvsvc.SessionEnumRequest{
+	resp, err := m.Client.SessionEnum(m.Context, &srvsvc.SessionEnumRequest{
 		ServerName:             m.Binding,
 		ClientName:             "",
 		UserName:               "",

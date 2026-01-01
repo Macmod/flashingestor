@@ -6,3 +6,4 @@ Features planned for future releases:
 * Options to filter computers for remote collection
 * SOCKS support (at least partial)
 * Write testsuites
+* Basic CLI mode

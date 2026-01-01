@@ -13,15 +13,11 @@ import (
 func (rc *RemoteCollector) collectDCRegistryData(ctx context.Context, targetHost string) builder.DCRegistryData {
 	result := builder.DCRegistryData{}
 
-	mrpcObj, err := msrpc.NewMSRPC(ctx, targetHost, rc.auth)
+	mrpcObj, err := msrpc.NewWinregRPC(ctx, targetHost, rc.auth)
 	if err != nil {
 		return result
 	}
 	defer mrpcObj.Close()
-
-	if err := mrpcObj.BindWinregClient(); err != nil {
-		return result
-	}
 
 	// CertificateMappingMethods
 	valCMMBytes, err := mrpcObj.GetRegistryKeyData(

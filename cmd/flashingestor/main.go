@@ -177,7 +177,7 @@ func main() {
 		func() {
 			// Clear cache callback
 			builder.BState().Clear()
-			logFunc("✅ [green]Cache cleared successfully[-]")
+			logFunc("✅ [green]Cache cleared from memory. RemoteCollect/Convert steps will reload it from disk.[-]")
 		},
 	)
 

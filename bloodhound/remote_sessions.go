@@ -15,19 +15,13 @@ func (rc *RemoteCollector) collectSessions(ctx context.Context, targetHost strin
 		Results:   []builder.Session{},
 	}
 
-	rpcObj, err := msrpc.NewMSRPC(ctx, targetHost, rc.auth)
+	rpcObj, err := msrpc.NewSrvsvcRPC(ctx, targetHost, rc.auth)
 	if err != nil {
 		errStr := fmt.Sprint(err)
 		result.FailureReason = &errStr
 		return result
 	}
 	defer rpcObj.Close()
-
-	if err := rpcObj.BindSrvsvcClient(); err != nil {
-		errStr := fmt.Sprint(err)
-		result.FailureReason = &errStr
-		return result
-	}
 
 	sessions, err := rpcObj.GetSessions(ctx)
 	if err != nil {

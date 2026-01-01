@@ -6,13 +6,8 @@ import (
 	"github.com/oiweiwei/go-msrpc/msrpc/rrp/winreg/v1"
 )
 
-func (m *MSRPC) GetRegistryKeyData(subkey string, subvalue string) ([]byte, error) {
-	client, ok := m.Client.(winreg.WinregClient)
-	if !ok {
-		return nil, fmt.Errorf("winreg client type assertion failed")
-	}
-
-	hklmResp, err := client.OpenLocalMachine(m.Context, &winreg.OpenLocalMachineRequest{
+func (m *WinregRPC) GetRegistryKeyData(subkey string, subvalue string) ([]byte, error) {
+	hklmResp, err := m.Client.OpenLocalMachine(m.Context, &winreg.OpenLocalMachineRequest{
 		ServerName:    "",
 		DesiredAccess: 0x02000000,
 	})
@@ -22,7 +17,7 @@ func (m *MSRPC) GetRegistryKeyData(subkey string, subvalue string) ([]byte, erro
 	}
 
 	hiveHandle := hklmResp.Key
-	subkeyResp, err := client.BaseRegOpenKey(m.Context, &winreg.BaseRegOpenKeyRequest{
+	subkeyResp, err := m.Client.BaseRegOpenKey(m.Context, &winreg.BaseRegOpenKeyRequest{
 		Key:           hiveHandle,
 		SubKey:        &winreg.UnicodeString{Buffer: subkey},
 		Options:       0x00000000,
@@ -34,7 +29,7 @@ func (m *MSRPC) GetRegistryKeyData(subkey string, subvalue string) ([]byte, erro
 	}
 
 	subkeyHandle := subkeyResp.ResultKey
-	valueResp, err := client.BaseRegQueryValue(m.Context, &winreg.BaseRegQueryValueRequest{
+	valueResp, err := m.Client.BaseRegQueryValue(m.Context, &winreg.BaseRegQueryValueRequest{
 		Key:        subkeyHandle,
 		ValueName:  &winreg.UnicodeString{Buffer: subvalue},
 		DataLength: 1024,

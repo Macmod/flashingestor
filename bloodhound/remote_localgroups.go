@@ -13,15 +13,11 @@ import (
 // collectLocalGroups retrieves local group memberships from a target system via RPC
 func (rc *RemoteCollector) collectLocalGroups(ctx context.Context, targetIp string, targetHost string, computerSid string, isDC bool, domain string) []builder.LocalGroupAPIResult {
 	localGroupResults := []builder.LocalGroupAPIResult{}
-	rpcObj, err := msrpc.NewMSRPC(ctx, targetIp, rc.auth)
+	rpcObj, err := msrpc.NewSamrRPC(ctx, targetIp, rc.auth)
 	if err != nil {
 		return localGroupResults
 	}
 	defer rpcObj.Close()
-
-	if err := rpcObj.BindSamrClient(); err != nil {
-		return localGroupResults
-	}
 
 	localGroups, _ := rpcObj.GetLocalGroupMembers(isDC)
 
@@ -105,15 +101,11 @@ func (rc *RemoteCollector) ProcessLocalGroupMembers(ctx context.Context, localMe
 		if strings.HasPrefix(memberSid, machineSid+"-") {
 			newSid := fmt.Sprintf("%s-%s", machineSid, GetRID(memberSid))
 
-			rpcObj, err := msrpc.NewMSRPC(ctx, machineHost, rc.auth)
+			rpcObj, err := msrpc.NewLsatRPC(ctx, machineHost, rc.auth)
 			if err != nil {
 				continue
 			}
 			defer rpcObj.Close()
-
-			if err := rpcObj.BindLsatClient(); err != nil {
-				continue
-			}
 
 			resolvedSids, err := rpcObj.LookupSids([]string{memberSid})
 			if err != nil || len(resolvedSids) != 1 {

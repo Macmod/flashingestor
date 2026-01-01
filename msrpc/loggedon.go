@@ -13,12 +13,7 @@ type LoggedOnUser struct {
 	Domain   string
 }
 
-func (m *MSRPC) GetLoggedOnUsers(ctx context.Context) ([]LoggedOnUser, error) {
-	client, ok := m.Client.(wkssvc.WkssvcClient)
-	if !ok {
-		return nil, fmt.Errorf("wkssvc client type assertion failed")
-	}
-
+func (m *WkssvcRPC) GetLoggedOnUsers(ctx context.Context) ([]LoggedOnUser, error) {
 	userInfo := wkssvc.WorkstationUserEnum{
 		Level: 1,
 		WorkstationUserInfo: &wkssvc.WorkstationUserEnum_WorkstationUserInfo{
@@ -31,7 +26,7 @@ func (m *MSRPC) GetLoggedOnUsers(ctx context.Context) ([]LoggedOnUser, error) {
 		},
 	}
 
-	resp, err := client.UserEnum(m.Context, &wkssvc.UserEnumRequest{
+	resp, err := m.Client.UserEnum(m.Context, &wkssvc.UserEnumRequest{
 		ServerName:             m.Binding,
 		UserInfo:               &userInfo,
 		PreferredMaximumLength: 0xFFFFFFFF,

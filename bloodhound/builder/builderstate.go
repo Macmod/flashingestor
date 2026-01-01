@@ -12,6 +12,12 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
+// Cache shards' constants
+const (
+	ShardNumStandard = 16 // Standard number of shards
+	ShardNumSmall    = 2  // Smaller number of shards
+)
+
 // State maintains global caches and mappings during BloodHound data construction.
 // This is a singleton accessed via BState().
 type State struct {
@@ -27,6 +33,7 @@ type State struct {
 	ChildCache             *ParentChildCache
 	AdminSDHolderHashCache sync.Map // Thread-safe map[string]string
 	CertTemplateCache      *StringCache
+	GPOCache               *GPOCache
 	WellKnown              *WellKnownSIDTracker
 	CacheWaitGroup         sync.WaitGroup
 	EmptySDCount           int
@@ -50,8 +57,6 @@ func BState() *State {
 func (st *State) Init() {
 	st.EmptySDCount = 0
 
-	// ObjectTypeGUIDMap and AdminSDHolderHashCache are now sync.Map, no init needed
-
 	if st.DomainSIDCache == nil {
 		st.DomainSIDCache = NewSimpleCache()
 	}
@@ -61,7 +66,7 @@ func (st *State) Init() {
 	}
 
 	if st.SIDCache == nil {
-		st.SIDCache = NewCache(16)
+		st.SIDCache = NewCache(ShardNumStandard)
 	}
 
 	if st.DomainControllers == nil {
@@ -69,25 +74,27 @@ func (st *State) Init() {
 	}
 
 	if st.MemberCache == nil {
-		st.MemberCache = NewCache(16)
+		st.MemberCache = NewCache(ShardNumStandard)
 	}
 
 	if st.HostDnsCache == nil {
-		st.HostDnsCache = NewCache(16)
+		st.HostDnsCache = NewCache(ShardNumStandard)
 	}
 
 	if st.SamCache == nil {
-		st.SamCache = NewCache(16)
+		st.SamCache = NewCache(ShardNumStandard)
 	}
 
 	if st.ChildCache == nil {
-		st.ChildCache = NewParentChildCache(16)
+		st.ChildCache = NewParentChildCache(ShardNumStandard)
 	}
 
-	// AdminSDHolderHashCache is now sync.Map, no init needed
-
 	if st.CertTemplateCache == nil {
-		st.CertTemplateCache = NewCache(2)
+		st.CertTemplateCache = NewCache(ShardNumSmall)
+	}
+
+	if st.GPOCache == nil {
+		st.GPOCache = NewGPOCache()
 	}
 
 	if st.WellKnown == nil {
@@ -261,11 +268,12 @@ func (st *State) Clear() {
 
 	st.DomainSIDCache = NewSimpleCache()
 	st.SIDDomainCache = NewSimpleCache()
-	st.MemberCache = NewCache(16)
-	st.SIDCache = NewCache(16)
-	st.HostDnsCache = NewCache(16)
-	st.SamCache = NewCache(16)
-	st.ChildCache = NewParentChildCache(16)
-	st.CertTemplateCache = NewCache(16)
+	st.MemberCache = NewCache(ShardNumStandard)
+	st.SIDCache = NewCache(ShardNumStandard)
+	st.HostDnsCache = NewCache(ShardNumStandard)
+	st.SamCache = NewCache(ShardNumStandard)
+	st.ChildCache = NewParentChildCache(ShardNumStandard)
+	st.CertTemplateCache = NewCache(ShardNumSmall)
+	st.GPOCache = NewGPOCache()
 	st.loadedCaches = make(map[string]bool)
 }

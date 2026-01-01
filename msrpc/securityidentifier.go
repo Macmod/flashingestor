@@ -9,18 +9,13 @@ import (
 	"github.com/oiweiwei/go-msrpc/msrpc/samr/samr/v1"
 )
 
-func (m *MSRPC) GetMachineSid(handle *samr.Handle, testName *string) (*dtyp.SID, error) {
-	client, ok := m.Client.(samr.SamrClient)
-	if !ok {
-		return nil, fmt.Errorf("samr client type assertion failed")
-	}
-
+func (m *SamrRPC) GetMachineSid(handle *samr.Handle, testName *string) (*dtyp.SID, error) {
 	var sid *dtyp.SID
 	if testName == nil {
 		return nil, fmt.Errorf("testName cannot be nil")
 	}
 
-	result, err := client.LookupDomainInSAMServer(m.Context, &samr.LookupDomainInSAMServerRequest{
+	result, err := m.Client.LookupDomainInSAMServer(m.Context, &samr.LookupDomainInSAMServerRequest{
 		Server: handle,
 		Name:   &dtyp.UnicodeString{Buffer: *testName},
 	})
@@ -35,7 +30,7 @@ func (m *MSRPC) GetMachineSid(handle *samr.Handle, testName *string) (*dtyp.SID,
 
 		if len(domains) > 0 {
 			targetDomain := domains[0]
-			result, err := client.LookupDomainInSAMServer(m.Context, &samr.LookupDomainInSAMServerRequest{
+			result, err := m.Client.LookupDomainInSAMServer(m.Context, &samr.LookupDomainInSAMServerRequest{
 				Server: handle,
 				Name:   &dtyp.UnicodeString{Buffer: targetDomain.Name.Buffer},
 			})
@@ -60,15 +55,10 @@ type ResolvedSID struct {
 	DomainSID string
 }
 
-func (m *MSRPC) LookupSids(sids []string) ([]ResolvedSID, error) {
+func (m *LsatRPC) LookupSids(sids []string) ([]ResolvedSID, error) {
 	resolvedSid := make([]ResolvedSID, 0)
 
-	client, ok := m.Client.(lsat.LsarpcClient)
-	if !ok {
-		return nil, fmt.Errorf("lsat client type assertion failed")
-	}
-
-	lsaConResp, err := client.OpenPolicy2(m.Context, &lsat.OpenPolicy2Request{
+	lsaConResp, err := m.Client.OpenPolicy2(m.Context, &lsat.OpenPolicy2Request{
 		// Check mask
 		DesiredAccess: dtyp.AccessMaskGenericRead | dtyp.AccessMaskGenericExecute | dtyp.AccessMaskAccessSystemSecurity,
 	})
@@ -106,7 +96,7 @@ func (m *MSRPC) LookupSids(sids []string) ([]ResolvedSID, error) {
 		MappedCount: 0,
 	}
 
-	lookupResp, err := client.LookupSIDs(m.Context, lookupSidsReq)
+	lookupResp, err := m.Client.LookupSIDs(m.Context, lookupSidsReq)
 	if err != nil {
 		return nil, fmt.Errorf("LsarLookupSids failed: %w", err)
 	}

@@ -15,19 +15,13 @@ func (rc *RemoteCollector) collectRegistrySessions(ctx context.Context, targetHo
 		Results:   []builder.Session{},
 	}
 
-	rpcObj, err := msrpc.NewMSRPC(ctx, targetHost, rc.auth)
+	rpcObj, err := msrpc.NewWinregRPC(ctx, targetHost, rc.auth)
 	if err != nil {
 		errStr := fmt.Sprint(err)
 		result.FailureReason = &errStr
 		return result
 	}
 	defer rpcObj.Close()
-
-	if err := rpcObj.BindWinregClient(); err != nil {
-		errStr := fmt.Sprint(err)
-		result.FailureReason = &errStr
-		return result
-	}
 
 	regSessions, err := rpcObj.GetSessionsFromRegistry(ctx)
 	if err != nil {

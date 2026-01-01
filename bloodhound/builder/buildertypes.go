@@ -124,7 +124,7 @@ type Domain struct {
 	Trusts               []DomainTrust    `json:"Trusts"`
 	Links                []GPLinkRef      `json:"Links"`
 	ChildObjects         []TypedPrincipal `json:"ChildObjects"`
-	GPOChanges           GPOChangeSet     `json:"GPOChanges"`
+	GPOChanges           GPOChanges       `json:"GPOChanges"`
 	InheritanceHashes    []string         `json:"InheritanceHashes"`              // TODO: Fill
 	ForestRootIdentifier string           `json:"ForestRootIdentifier,omitempty"` // TODO: Fill
 }
@@ -156,7 +156,7 @@ type OrganizationalUnit struct {
 	Properties   OUProperties     `json:"Properties"`
 	Links        []GPLinkRef      `json:"Links"`
 	ChildObjects []TypedPrincipal `json:"ChildObjects"`
-	GPOChanges   GPOChangeSet     `json:"GPOChanges"`
+	GPOChanges   GPOChanges       `json:"GPOChanges"`
 }
 
 // OUProperties contains the OU-specific metadata.
@@ -168,14 +168,13 @@ type OUProperties struct {
 	HighValue         bool   `json:"highvalue"`
 }
 
-// GPOChangeSet represents GPO-related deltas linked to this OU.
-// (Not implemented yet)
-type GPOChangeSet struct {
-	AffectedComputers  []TypedPrincipal
-	DcomUsers          []any
-	LocalAdmins        []any
-	PSRemoteUsers      []any
-	RemoteDesktopUsers []any
+// GPOChanges represents GPO-related deltas linked to this OU.
+type GPOChanges struct {
+	AffectedComputers  []TypedPrincipal `json:"affectedcomputers"`
+	DcomUsers          []TypedPrincipal `json:"dcomusers"`
+	LocalAdmins        []TypedPrincipal `json:"localadmins"`
+	PSRemoteUsers      []TypedPrincipal `json:"psremoteusers"`
+	RemoteDesktopUsers []TypedPrincipal `json:"remotedesktopusers"`
 }
 
 // GPO represents a Group Policy Object in AD.

@@ -17,19 +17,55 @@ import (
 	"github.com/oiweiwei/go-msrpc/msrpc/wkst/wkssvc/v1"
 )
 
-// Custom type for friendly implementation of RPCs
-type MSRPC struct {
+// BaseRPC contains the common fields for all RPC client types
+type BaseRPC struct {
 	Conn    dcerpc.Conn
 	Context context.Context
 	Binding string
-	Client  interface{}
 }
 
-func (m *MSRPC) Close() {
-	m.Conn.Close(m.Context)
+func (b *BaseRPC) Close() {
+	b.Conn.Close(b.Context)
 }
 
-func NewMSRPC(ctx context.Context, targetHost string, auth *config.CredentialMgr) (MSRPC, error) {
+// WinregRPC wraps a Windows Registry RPC client
+type WinregRPC struct {
+	BaseRPC
+	Client winreg.WinregClient
+}
+
+// SamrRPC wraps a SAM RPC client
+type SamrRPC struct {
+	BaseRPC
+	Client samr.SamrClient
+}
+
+// SrvsvcRPC wraps a Server Service RPC client
+type SrvsvcRPC struct {
+	BaseRPC
+	Client srvsvc.SrvsvcClient
+}
+
+// LsatRPC wraps an LSA RPC client (local)
+type LsatRPC struct {
+	BaseRPC
+	Client lsat.LsarpcClient
+}
+
+// LsadRPC wraps an LSA RPC client (domain)
+type LsadRPC struct {
+	BaseRPC
+	Client lsad.LsarpcClient
+}
+
+// WkssvcRPC wraps a Workstation Service RPC client
+type WkssvcRPC struct {
+	BaseRPC
+	Client wkssvc.WkssvcClient
+}
+
+// newBaseRPC creates the common RPC connection
+func newBaseRPC(ctx context.Context, targetHost string, auth *config.CredentialMgr) (BaseRPC, error) {
 	// Get credentials for DCERPC
 	target := auth.NewTarget("host", targetHost)
 
@@ -39,7 +75,7 @@ func NewMSRPC(ctx context.Context, targetHost string, auth *config.CredentialMgr
 
 	dcerpcOpts, err := dcerpcauth.AuthenticationOptions(ctx, auth.Creds(), target, dcerpcOptions)
 	if err != nil {
-		return MSRPC{}, fmt.Errorf("failed to get auth options: %w", err)
+		return BaseRPC{}, fmt.Errorf("failed to get auth options: %w", err)
 	}
 
 	/* TODO (Future): Review if the endpoint mapper is really needed */
@@ -56,70 +92,126 @@ func NewMSRPC(ctx context.Context, targetHost string, auth *config.CredentialMgr
 	// Connect to the RPC service
 	conn, err := dcerpc.Dial(ctx, binding, dcerpcOpts...)
 	if err != nil {
-		return MSRPC{}, fmt.Errorf("connection failed: %w", err)
+		return BaseRPC{}, fmt.Errorf("connection failed: %w", err)
 	}
 
-	return MSRPC{
+	return BaseRPC{
 		Conn:    conn,
 		Context: ctx,
 		Binding: binding,
 	}, nil
 }
 
-// Helpers for binding specific clients
-func (m *MSRPC) BindWinregClient() error {
-	client, err := winreg.NewWinregClient(m.Context, m.Conn, dcerpc.WithInsecure())
+// NewWinregRPC creates a new Windows Registry RPC client
+func NewWinregRPC(ctx context.Context, targetHost string, auth *config.CredentialMgr) (*WinregRPC, error) {
+	base, err := newBaseRPC(ctx, targetHost, auth)
 	if err != nil {
-		return fmt.Errorf("failed to bind winreg client: %w", err)
+		return nil, err
 	}
 
-	m.Client = client
-	return nil
+	client, err := winreg.NewWinregClient(base.Context, base.Conn, dcerpc.WithInsecure())
+	if err != nil {
+		base.Close()
+		return nil, fmt.Errorf("failed to bind winreg client: %w", err)
+	}
+
+	return &WinregRPC{
+		BaseRPC: base,
+		Client:  client,
+	}, nil
 }
 
-func (m *MSRPC) BindSamrClient() error {
-	client, err := samr.NewSamrClient(m.Context, m.Conn, dcerpc.WithSeal())
+// NewSamrRPC creates a new SAM RPC client
+func NewSamrRPC(ctx context.Context, targetHost string, auth *config.CredentialMgr) (*SamrRPC, error) {
+	base, err := newBaseRPC(ctx, targetHost, auth)
 	if err != nil {
-		return fmt.Errorf("failed to bind samr client: %w", err)
+		return nil, err
 	}
 
-	m.Client = client
-	return nil
+	client, err := samr.NewSamrClient(base.Context, base.Conn, dcerpc.WithSeal())
+	if err != nil {
+		base.Close()
+		return nil, fmt.Errorf("failed to bind samr client: %w", err)
+	}
+
+	return &SamrRPC{
+		BaseRPC: base,
+		Client:  client,
+	}, nil
 }
 
-func (m *MSRPC) BindSrvsvcClient() error {
-	client, err := srvsvc.NewSrvsvcClient(m.Context, m.Conn, dcerpc.WithInsecure())
+// NewSrvsvcRPC creates a new Server Service RPC client
+func NewSrvsvcRPC(ctx context.Context, targetHost string, auth *config.CredentialMgr) (*SrvsvcRPC, error) {
+	base, err := newBaseRPC(ctx, targetHost, auth)
 	if err != nil {
-		return fmt.Errorf("failed to create srvsvc client: %w", err)
+		return nil, err
 	}
 
-	m.Client = client
-	return nil
+	client, err := srvsvc.NewSrvsvcClient(base.Context, base.Conn, dcerpc.WithInsecure())
+	if err != nil {
+		base.Close()
+		return nil, fmt.Errorf("failed to create srvsvc client: %w", err)
+	}
+
+	return &SrvsvcRPC{
+		BaseRPC: base,
+		Client:  client,
+	}, nil
 }
 
-func (m *MSRPC) BindLsatClient() error {
-	client, err := lsat.NewLsarpcClient(m.Context, m.Conn, dcerpc.WithSeal())
+// NewLsatRPC creates a new LSA RPC client (local)
+func NewLsatRPC(ctx context.Context, targetHost string, auth *config.CredentialMgr) (*LsatRPC, error) {
+	base, err := newBaseRPC(ctx, targetHost, auth)
 	if err != nil {
-		return fmt.Errorf("failed to create lsa client: %w", err)
+		return nil, err
 	}
-	m.Client = client
-	return nil
+
+	client, err := lsat.NewLsarpcClient(base.Context, base.Conn, dcerpc.WithSeal())
+	if err != nil {
+		base.Close()
+		return nil, fmt.Errorf("failed to create lsa client: %w", err)
+	}
+
+	return &LsatRPC{
+		BaseRPC: base,
+		Client:  client,
+	}, nil
 }
 
-func (m *MSRPC) BindLsadClient() error {
-	client, err := lsad.NewLsarpcClient(m.Context, m.Conn, dcerpc.WithSeal())
+// NewLsadRPC creates a new LSA RPC client (domain)
+func NewLsadRPC(ctx context.Context, targetHost string, auth *config.CredentialMgr) (*LsadRPC, error) {
+	base, err := newBaseRPC(ctx, targetHost, auth)
 	if err != nil {
-		return fmt.Errorf("failed to create lsa client: %w", err)
+		return nil, err
 	}
-	m.Client = client
-	return nil
+
+	client, err := lsad.NewLsarpcClient(base.Context, base.Conn, dcerpc.WithSeal())
+	if err != nil {
+		base.Close()
+		return nil, fmt.Errorf("failed to create lsa client: %w", err)
+	}
+
+	return &LsadRPC{
+		BaseRPC: base,
+		Client:  client,
+	}, nil
 }
 
-func (m *MSRPC) BindWkssvcClient() error {
-	client, err := wkssvc.NewWkssvcClient(m.Context, m.Conn, dcerpc.WithInsecure())
+// NewWkssvcRPC creates a new Workstation Service RPC client
+func NewWkssvcRPC(ctx context.Context, targetHost string, auth *config.CredentialMgr) (*WkssvcRPC, error) {
+	base, err := newBaseRPC(ctx, targetHost, auth)
 	if err != nil {
-		return fmt.Errorf("failed to create wkssvc client: %w", err)
+		return nil, err
 	}
-	m.Client = client
-	return nil
+
+	client, err := wkssvc.NewWkssvcClient(base.Context, base.Conn, dcerpc.WithInsecure())
+	if err != nil {
+		base.Close()
+		return nil, fmt.Errorf("failed to create wkssvc client: %w", err)
+	}
+
+	return &WkssvcRPC{
+		BaseRPC: base,
+		Client:  client,
+	}, nil
 }

@@ -16,19 +16,13 @@ func (rc *RemoteCollector) collectPrivilegedSessions(ctx context.Context, target
 		Results:   []builder.Session{},
 	}
 
-	rpcObj, err := msrpc.NewMSRPC(ctx, targetHost, rc.auth)
+	rpcObj, err := msrpc.NewWkssvcRPC(ctx, targetHost, rc.auth)
 	if err != nil {
 		errStr := fmt.Sprint(err)
 		result.FailureReason = &errStr
 		return result
 	}
 	defer rpcObj.Close()
-
-	if err := rpcObj.BindWkssvcClient(); err != nil {
-		errStr := fmt.Sprint(err)
-		result.FailureReason = &errStr
-		return result
-	}
 
 	loggedOn, err := rpcObj.GetLoggedOnUsers(ctx)
 	if err != nil {
