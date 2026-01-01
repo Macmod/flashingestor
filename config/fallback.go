@@ -14,11 +14,11 @@ func GetFallbackQueryDefinitions() []QueryDefinition {
 		},
 		{
 			Name:   "Schema",
-			Filter: "(objectClass=*)",
+			Filter: "(|(name=ms-mc*wd)(name=ms-lap*))",
 			Attributes: []string{
 				"name", "schemaIDGUID",
 			},
-			PageSize: 1000,
+			PageSize: 10,
 		},
 		{
 			Name:   "Domains",
@@ -152,17 +152,5 @@ func GetFallbackConversionOpts() ConversionOptions {
 		WriterBufsize:           33554432, // 32MB
 		CompressOutput:          true,
 		CleanupAfterCompression: true,
-	}
-}
-
-// GetBaseDNForQuery returns the appropriate base DN for a given query
-func GetBaseDNForQuery(queryName, baseDN string) string {
-	switch queryName {
-	case "Schema":
-		return "CN=Schema,CN=Configuration," + baseDN
-	case "Configuration":
-		return "CN=Configuration," + baseDN
-	default:
-		return baseDN
 	}
 }

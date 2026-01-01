@@ -17,8 +17,8 @@ ingestion:
         - nTSecurityDescriptor
 
     - name: Schema
-      filter: "(objectClass=*)"
-      page_size: 1000
+      filter: "(|(name=ms-mc*wd)(name=ms-lap*))"
+      page_size: 10
       attributes:
         - name
         - schemaIDGUID

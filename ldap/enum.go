@@ -86,3 +86,17 @@ var FUNCTIONAL_LEVELS = map[string]string{
 	"6": "2012 R2",
 	"7": "2016",
 }
+
+var OBJECT_TYPE_GUID_MAP = map[string]string{
+	"user":                     "bf967aba-0de6-11d0-a285-00aa003049e2",
+	"computer":                 "bf967a86-0de6-11d0-a285-00aa003049e2",
+	"container":                "bf967a8b-0de6-11d0-a285-00aa003049e2",
+	"domain":                   "19195a5a-6da0-11d0-afd3-00c04fd930c9",
+	"group":                    "bf967a9c-0de6-11d0-a285-00aa003049e2",
+	"organizational-unit":      "bf967aa5-0de6-11d0-a285-00aa003049e2",
+	"group-policy-container":   "f30e3bc2-9ff0-11d1-b603-0000f80367c1",
+	"pki-enrollment-service":   "ee4aa692-3bba-11d2-90cc-00c04fd91ab1",
+	"pki-certificate-template": "e5209ca2-3bba-11d2-90cc-00c04fd91ab1",
+	"certification-authority":  "3fdfee50-47f4-11d1-a9c3-0000f80367c1",
+	"ms-pki-enterprise-oid":    "37cfd85c-6719-4ad8-8f9e-8678ba627563",
+}

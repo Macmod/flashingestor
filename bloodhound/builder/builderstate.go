@@ -55,6 +55,11 @@ func BState() *State {
 }
 
 func (st *State) Init() {
+	st.ObjectTypeGUIDMap = sync.Map{}
+	for k, v := range gildap.OBJECT_TYPE_GUID_MAP {
+		st.ObjectTypeGUIDMap.Store(k, v)
+	}
+
 	st.EmptySDCount = 0
 
 	if st.DomainSIDCache == nil {
@@ -262,8 +267,11 @@ func (st *State) Clear() {
 	st.DomainControllers = make(map[string][]TypedPrincipal, 0)
 	st.domainControllersMu.Unlock()
 
-	// Clear sync.Maps by creating new instances
 	st.ObjectTypeGUIDMap = sync.Map{}
+	for k, v := range gildap.OBJECT_TYPE_GUID_MAP {
+		st.ObjectTypeGUIDMap.Store(k, v)
+	}
+
 	st.AdminSDHolderHashCache = sync.Map{}
 
 	st.DomainSIDCache = NewSimpleCache()
