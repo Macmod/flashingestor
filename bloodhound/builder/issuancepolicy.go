@@ -5,7 +5,7 @@ import gildap "github.com/Macmod/flashingestor/ldap"
 // BuildIssuancePolicyFromEntry constructs an IssuancePolicy object from an LDAP entry.
 func BuildIssuancePolicyFromEntry(entry *gildap.LDAPEntry) (*IssuancePolicy, bool) {
 	var baseObj BaseADObject
-	baseObj.FromEntry(entry, "issuancepolicy")
+	baseObj.FromEntry(entry, "ms-pki-enterprise-oid")
 
 	var baseProps BaseProperties
 	baseProps.FromEntry(entry)

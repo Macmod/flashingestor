@@ -5,7 +5,7 @@ import gildap "github.com/Macmod/flashingestor/ldap"
 // BuildAIACAFromEntry constructs an AIACA object from an LDAP entry.
 func BuildAIACAFromEntry(entry *gildap.LDAPEntry) (*AIACA, bool) {
 	var baseObj BaseADObject
-	baseObj.FromEntry(entry, "aiaca")
+	baseObj.FromEntry(entry, "certification-authority")
 
 	var baseProps BaseProperties
 	baseProps.FromEntry(entry)

@@ -9,7 +9,7 @@ import (
 // BuildGPOFromEntry constructs a GPO object from an LDAP entry.
 func BuildGPOFromEntry(entry *gildap.LDAPEntry) (*GPO, bool) {
 	var baseObj BaseADObject
-	baseObj.FromEntry(entry, "gpo")
+	baseObj.FromEntry(entry, "group-policy-container")
 
 	var baseProps BaseProperties
 	baseProps.FromEntry(entry)

@@ -175,7 +175,7 @@ var certificateAuthorityFlagDefinitions = []flagDefinition{
 // BuildCertTemplateFromEntry constructs a CertTemplate object from an LDAP entry.
 func BuildCertTemplateFromEntry(entry *gildap.LDAPEntry) (*CertTemplate, bool) {
 	var baseObj BaseADObject
-	baseObj.FromEntry(entry, "certtemplate")
+	baseObj.FromEntry(entry, "pki-certificate-template")
 
 	var baseProps BaseProperties
 	baseProps.FromEntry(entry)

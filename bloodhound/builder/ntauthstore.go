@@ -12,7 +12,7 @@ import (
 // BuildNTAuthStoreFromEntry constructs an NTAuthStore object from an LDAP entry.
 func BuildNTAuthStoreFromEntry(entry *gildap.LDAPEntry) (*NTAuthStore, bool) {
 	var baseObj BaseADObject
-	baseObj.FromEntry(entry, "ntauthstore")
+	baseObj.FromEntry(entry, "certification-authority")
 
 	var baseProps BaseProperties
 	baseProps.FromEntry(entry)

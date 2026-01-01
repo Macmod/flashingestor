@@ -9,7 +9,7 @@ import (
 // BuildOUFromEntry constructs an OrganizationalUnit object from an LDAP entry.
 func BuildOUFromEntry(entry *gildap.LDAPEntry) (*OrganizationalUnit, bool) {
 	var baseObj BaseADObject
-	baseObj.FromEntry(entry, "ou")
+	baseObj.FromEntry(entry, "organizational-unit")
 
 	var baseProps BaseProperties
 	baseProps.FromEntry(entry)

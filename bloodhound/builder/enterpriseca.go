@@ -5,7 +5,7 @@ import gildap "github.com/Macmod/flashingestor/ldap"
 // BuildEnterpriseCAFromEntry constructs an EnterpriseCA object from an LDAP entry.
 func BuildEnterpriseCAFromEntry(entry *gildap.LDAPEntry) (*EnterpriseCA, bool) {
 	var baseObj BaseADObject
-	baseObj.FromEntry(entry, "enterpriseca")
+	baseObj.FromEntry(entry, "certification-authority")
 
 	var baseProps BaseProperties
 	baseProps.FromEntry(entry)

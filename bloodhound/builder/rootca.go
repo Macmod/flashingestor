@@ -5,7 +5,7 @@ import gildap "github.com/Macmod/flashingestor/ldap"
 // BuildRootCAFromEntry constructs a RootCA object from an LDAP entry.
 func BuildRootCAFromEntry(entry *gildap.LDAPEntry) (*RootCA, bool) {
 	var baseObj BaseADObject
-	baseObj.FromEntry(entry, "rootca")
+	baseObj.FromEntry(entry, "certification-authority")
 
 	var baseProps BaseProperties
 	baseProps.FromEntry(entry)
