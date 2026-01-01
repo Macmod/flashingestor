@@ -9,9 +9,12 @@ require (
 	github.com/RedTeamPentesting/adauth v0.5.3
 	github.com/TheManticoreProject/winacl v1.2.14
 	github.com/cespare/xxhash/v2 v2.3.0
+	github.com/fatih/color v1.18.0
 	github.com/gdamore/tcell/v2 v2.8.1
 	github.com/go-ldap/ldap/v3 v3.4.12
 	github.com/oiweiwei/go-msrpc v1.2.12
+	github.com/olekukonko/tablewriter v0.0.5
+	github.com/prometheus-community/pro-bing v0.5.0
 	github.com/rivo/tview v0.42.0
 	github.com/spf13/pflag v1.0.6
 	github.com/vmihailenco/msgpack v4.0.4+incompatible
@@ -45,6 +48,7 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/crypto v0.40.0 // indirect
 	golang.org/x/net v0.42.0 // indirect
+	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/term v0.33.0 // indirect
 	golang.org/x/text v0.27.0 // indirect

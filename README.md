@@ -76,36 +76,51 @@ Then run the steps as desired. For a `DCOnly` collection, just run `Ctrl+l`, che
 
 ## DC discovery & DNS
 
-If you don't specify `--dc`, `flashingestor` will try to find it with SRV / A lookups, which may add some initial delay to the `Ingest` step. In that case, you must specify `--dns` if your standard DNS server is not aware of the domain (when AD-integrated DNS is in use, just point it to the DC that hosts it).
+It's always recommended to specify `--dc` and `--dns` to run `flashingestor`. If you don't specify `--dc`, `flashingestor` will try to find it with SRV / A lookups, which may add some initial delay to the `Ingest` step.
 
-Regardless of `--dc`, if you want to run the `Remote Collection` step and your DNS server is not aware of computers in the domain, then you must specify `--dns` for the lookups.
+In that case, you must specify `--dns` if your standard DNS server is not aware of the domain (when AD-integrated DNS is in use, just point it to the DC that hosts it). Moreover, regardless of `--dc`, if you want to run the `Remote Collection` step and your DNS server is not aware of computers in the domain, then you must specify `--dns` for the lookups.
 
-## Credentials for RPC/HTTP
+In environments with multiple DCs, you can also use the `dcprobe` utility to benchmark the latency to all DCs and find a good target candidate for the ingestion.
+
+```bash
+$ go build ./cmd/dcprobe
+$ ./dcprobe --dns 192.168.88.6 -d creta.local -r 10
+```
+
+## Config file
+
+If the config file is not present under the current directory as `config.yaml` or in the path provided via `--config`, the default options (the same as in the provided [config.yaml](config.yaml)) will be assumed - they are hardcoded in [config/fallback.go](config/fallback.go).
+
+## Ingestion
+
+The default queries in the provided `config.yaml` are designed with information needed by Bloodhound conversion in mind. You may choose to customize queries or attributes in `config.yaml`, but it's best to try to avoid removing needed attributes, and to avoid changing the meaning of the search filters.
+
+If `recurse_trusts` is set to `true`, it'll try to ingest any trusted domains found recursively with the initial credential provided for ingestion.
+
+If `search_forest` is set to `true`, it'll try to ingest domains that are part of the same forest as the initial domain from the `Configuration` partition - no additional queries will be issued, as this is already part of the default ingestion plan. Both options can be set at the same time, and `flashingestor` will only ingest any domain found once (either via a trust, or via the current forest).
+
+If `recurse_trusts` is enabled and `recurse_feasible_only` is also set to true, it'll only try to ingest a trusted domain if the trust is (1) inbound/bidirectional and (2) either involves the initial domain, or is transitive. That means that outbound-only trusts won't be traversed, and apart from the first level of trusts, the ingestion paths stop at nontransitive trusts - if B trusts A nontransitively, then A can still authenticate into B; but if C also trusts B nontransitively, then A can't authenticate to C.
+ 
+## Remote Collection
+
+If you intend to run the remote collection step, check the enabled `methods` - these roughly correspond to the methods offered by SharpHound and can be used to toggle specific collections via RPC or HTTP.
 
 The `--remote-*` arguments can be used to specify a separate set of credentials for remote collection. If you don't specify these credentials, `flashingestor` will try to use the same credentials for the user provided in the standard ingestion arguments (`--user`, `--password`, etc).
 
 A local admin can also be used for remote collection by specifying `--remote-user Administrator@.`, for example, but the effectiveness of this approach will depend on whether the account is the built-in administrator or not, and on the values of the `FilterAdministratorToken` / `LocalAccountTokenFilterPolicy` registry keys. For more detail on this behavior, refer to [Pass-the-Hash Is Dead: Long Live LocalAccountTokenFilterPolicy](https://specterops.io/blog/2017/03/16/pass-the-hash-is-dead-long-live-localaccounttokenfilterpolicy/)
 
-## Customization
+## Conversion
 
-The default queries in the provided `config.yaml` (and hardcoded in the code for the case in which no config file is present) are designed with information needed by Bloodhound conversion in mind. You may choose to customize queries or attributes in `config.yaml`, but it's best to try to avoid removing needed attributes, and to avoid changing the meaning of the search filters.
+The options `compress_output` and `cleanup_after_compression` can help keep the disk usage small. After loading the final dump in Bloodhound you can safely delete the files under `output/ldap` and `output/remote` manually if you don't have an use for them, but an interesting use case is keeping these files to look up important information and to avoid having to run the full collection from time to time.
 
-It's advisable to review the values of all settings in `config.yaml` before running `flashingestor`. In particular:
-1) If you intend to run the remote collection step, check the enabled `methods`. These roughly correspond to the methods offered by SharpHound.
-2) For ingestion, if `recurse_domains` is set to true, it'll try to ingest any trusted domains found recursively with the initial credential provided for ingestion.
-3) If `recurse_domains` is enabled and `recurse_feasible_only` is also set to true, it'll only try to ingest a trusted domain if the trust is (1) inbound/bidirectional and (2) either involves the initial domain, or is transitive. That means that outbound-only trusts won't be traversed, and apart from the first level of trusts, the ingestion paths stop at nontransitive trusts - if B trusts A nontransitively, then A can still authenticate into B; but if C also trusts B nontransitively, then A can't authenticate to C.
-4) `compress_output` and `cleanup_after_compression` can help keep the disk usage small. After loading the final dump in Bloodhound you can safely delete the files under `output/ldap` and `output/remote` manually, if you don't have any use for them, but an interesting use case is using these files to look up important information and to avoid having to run the full collection from time to time.
-
-## Ingest files
-
-The primary purpose of the `msgpack` files is to serve as an intermediary format to segregate responsibilities for the entire process, but these files can also be used as a source of information by converting them to JSON - this way you don't have to look up twice pieces of information (such as object attributes or remote collection results) that for some reason didn't make it into the final dump.
+The primary purpose of the `msgpack` files under the `output/ldap` and `output/remote` files is to serve as an intermediary format to segregate responsibilities for the entire process, but these files can also be used as a source of information by converting them to JSON - this way you don't have to look up raw object attributes or remote collection results:
 
 ```
 $ go build ./cmd/ingest2json
 $ ./ingest2json -in output/ldap/YOURDOMAIN/SelectedFile.msgpack  -out output.json
 ```
 
-[JQ](https://jqlang.org/)/[FX](https://github.com/antonmedv/fx), or your favorite programming language, can then be used to inspect the raw LDAP objects, or the raw results of the remote collection.
+A nice way of inspecting these files would be to use [JQ](https://jqlang.org/)/[FX](https://github.com/antonmedv/fx), or your favorite programming language 🙂
 
 # Contributing
 

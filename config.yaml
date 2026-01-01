@@ -4,8 +4,10 @@ common:
 # LDAP Ingestion Settings
 ingestion:
   include_acls: true
-  recurse_domains: true
-  recurse_feasible_only: true 
+  recurse_trusts: false
+  recurse_feasible_only: true
+  search_forest: true 
+  ldaps_to_ldap_fallback: true
   queries:
     - name: Configuration
       filter: "(objectClass=*)"

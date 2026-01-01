@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,20 +46,35 @@ type IngestionManager struct {
 	logFunc             func(string, ...interface{})
 	domainQueue         chan DomainRequest
 	trustEntriesChan    chan *ldap.Entry
+	configEntriesChan   chan *ldap.Entry
 	ingestedDomains     *sync.Map // tracks domains processed in current run
-	ingestionStartTime  time.Time
+	startTime           time.Time
 	domainCount         atomic.Int32 // tracks number of domains ingested
 	pendingDomains      atomic.Int32 // tracks domains queued but not yet completed
 	globalAborted       atomic.Bool  // tracks if ingestion has been aborted globally
-	recurseDomains      bool         // whether to recurse through trusts
+	recurseTrusts       bool         // whether to recurse through trusts
 	recurseFeasibleOnly bool         // only recurse feasible trusts (inbound trusts + transitive if beyond the 2nd level of trusts)
+	searchForest        bool         // whether to search the forest configuration partition for additional domains
 	includeACLs         bool         // whether to include nTSecurityDescriptor
+	ldapsToLdapFallback bool         // whether to fallback from LDAPS to LDAP on connection failure
 	initialDomain       string       // the initial domain that started the ingestion
 }
 
 // JobManager methods
 func newJobManager() *JobManager {
 	return &JobManager{}
+}
+
+// getBaseDNForQuery returns the appropriate base DN for a given query
+func getBaseDNForQuery(queryName, baseDN string) string {
+	switch queryName {
+	case "Schema":
+		return "CN=Schema,CN=Configuration," + baseDN
+	case "Configuration":
+		return "CN=Configuration," + baseDN
+	default:
+		return baseDN
+	}
 }
 
 func (jm *JobManager) initializeJobs(baseDN, outputDir string, queryDefs []config.QueryDefinition, includeACLs bool, callback func(int, gildap.QueryJob)) []gildap.QueryJob {
@@ -76,7 +92,7 @@ func (jm *JobManager) initializeJobs(baseDN, outputDir string, queryDefs []confi
 
 		job := gildap.QueryJob{
 			Name:       def.Name,
-			BaseDN:     config.GetBaseDNForQuery(def.Name, baseDN),
+			BaseDN:     getBaseDNForQuery(def.Name, baseDN),
 			Filter:     def.Filter,
 			Attributes: attributes,
 			PageSize:   uint32(def.PageSize),
@@ -99,6 +115,7 @@ func (jm *JobManager) initializeJobs(baseDN, outputDir string, queryDefs []confi
 func (m *IngestionManager) testLDAPConnection(
 	ctx context.Context,
 	target *adauth.Target,
+	ldapOptions *ldapauth.Options,
 ) error {
 	var err error
 
@@ -109,7 +126,7 @@ func (m *IngestionManager) testLDAPConnection(
 	}
 
 	// Test the connection
-	conn, err := ldapauth.ConnectTo(ctx, creds, target, m.ldapAuthOptions)
+	conn, err := ldapauth.ConnectTo(ctx, creds, target, ldapOptions)
 	if err != nil {
 		return fmt.Errorf("LDAP connection failed: %w", err)
 	}
@@ -127,8 +144,13 @@ func (m *IngestionManager) start(
 ) {
 	// Recreate channels for each ingestion run
 	m.domainQueue = make(chan DomainRequest, 100)
-	if m.recurseDomains {
+
+	if m.recurseTrusts {
 		m.trustEntriesChan = make(chan *ldap.Entry, 100)
+	}
+
+	if m.searchForest {
+		m.configEntriesChan = make(chan *ldap.Entry, 100)
 	}
 
 	// Reset counters for new ingestion run
@@ -137,8 +159,14 @@ func (m *IngestionManager) start(
 	m.globalAborted.Store(false)
 	m.initialDomain = strings.ToUpper(initialDomain)
 
-	m.ingestionStartTime = time.Now()
-	go m.processTrustEntries()
+	m.startTime = time.Now()
+	if m.recurseTrusts {
+		go m.processTrustEntries()
+	}
+
+	if m.searchForest {
+		go m.processConfigurationEntries()
+	}
 
 	m.pendingDomains.Add(1)
 	m.domainQueue <- DomainRequest{
@@ -163,7 +191,7 @@ func (m *IngestionManager) start(
 
 		// All domains have been processed, log final summary
 		if m.domainCount.Load() > 0 {
-			totalDuration := time.Since(m.ingestionStartTime)
+			totalDuration := time.Since(m.startTime)
 			m.logFunc("🕝 [blue]Ingested %d domain(s) in %s[-]", m.domainCount.Load(), core.FormatDuration(totalDuration))
 		} else {
 			m.logFunc("🫠 [red]No domains were ingested.[-]")
@@ -171,9 +199,62 @@ func (m *IngestionManager) start(
 	}()
 }
 
+func (m *IngestionManager) processConfigurationEntries() {
+	var ldapEntry gildap.LDAPEntry
+
+	for entryWithSource := range m.configEntriesChan {
+		ldapEntry.Init(entryWithSource)
+
+		objectClasses := ldapEntry.GetAttrVals("objectClass", []string{})
+		if !slices.Contains(objectClasses, "crossRef") {
+			continue
+		} else {
+			// systemFlags=3 means that
+			// the crossRef represents an AD domain naming context
+			// (not some other NC or weird partition)
+			systemFlags := ldapEntry.GetAttrVal("systemFlags", "0")
+			if systemFlags != "3" {
+				continue
+			}
+		}
+
+		sourceDomain := ldapEntry.GetDomainFromDN()
+		domainName := ldapEntry.GetAttrVal("dnsRoot", "")
+		if domainName == "" {
+			continue
+		}
+		domainName = strings.ToUpper(domainName)
+
+		if _, loaded := m.ingestedDomains.LoadOrStore(domainName, true); loaded {
+			continue
+		}
+
+		if m.globalAborted.Load() {
+			continue
+		}
+
+		baseDN := m.inferBaseDN(domainName)
+		m.logFunc("🔗 [green]Domain found in forest of \"%s\": \"%s\"[-]", sourceDomain, domainName)
+
+		m.pendingDomains.Add(1)
+		m.domainQueue <- DomainRequest{
+			DomainName:       domainName,
+			BaseDN:           baseDN,
+			DomainController: "",
+			SourceDomain:     sourceDomain,
+		}
+	}
+
+	// All entries have been processed, close channel
+	if m.configEntriesChan != nil {
+		close(m.configEntriesChan)
+	}
+}
+
 func (m *IngestionManager) processTrustEntries() {
+	var ldapEntry gildap.LDAPEntry
+
 	for entryWithSource := range m.trustEntriesChan {
-		var ldapEntry gildap.LDAPEntry
 		ldapEntry.Init(entryWithSource)
 
 		trustName := ldapEntry.GetAttrVal("name", "")
@@ -249,8 +330,8 @@ func (m *IngestionManager) processTrustEntries() {
 		}
 	}
 
-	// All trusts have been processed, close channel if recursing
-	if m.recurseDomains {
+	// All trusts have been processed, close channel
+	if m.trustEntriesChan != nil {
 		close(m.trustEntriesChan)
 	}
 }
@@ -270,6 +351,10 @@ func (m *IngestionManager) inferBaseDN(domainName string) string {
 func (m *IngestionManager) discoverDC(ctx context.Context, domainName string) (string, error) {
 	var discoveredDC string
 	var dcHost string
+
+	// Currently only falls back to the ldap lookup if the
+	// ldaps lookup doesn't work. Maybe we should try the other
+	// way around too?
 
 	// SRV lookups for LDAP / LDAPS
 	_, addrs, err := m.resolver.LookupSRV(ctx, m.ldapAuthOptions.Scheme, "tcp", domainName)
@@ -388,22 +473,62 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 		m.logFunc("🔗 [blue]Provided DC:[-] \"%s\"", domainController)
 	}
 
+	ldapOptions := m.ldapAuthOptions
 	target := m.auth.NewTarget(m.ldapAuthOptions.Scheme, domainController)
 
 	testCtx, testCancel := context.WithTimeout(ctx, config.DEFAULT_LDAP_TIMEOUT)
 	defer testCancel()
 
-	err := m.testLDAPConnection(testCtx, target)
+	err := m.testLDAPConnection(testCtx, target, ldapOptions)
 	if err != nil {
-		m.logFunc("❌ [red]LDAP connection test failed for \"%s\": %v[-]", domainName, err)
-		m.logFunc("🛑 [red]Skipping ingestion of \"%s\"[-]", domainName)
+		// Check if fallback is enabled and we're using LDAPS
+		if m.ldapsToLdapFallback && strings.EqualFold(ldapOptions.Scheme, "ldaps") {
+			m.logFunc("🤔 [yellow]LDAPS connection failed for \"%s\", attempting LDAP fallback...[-]", domainName)
 
-		// Update all rows to show "Skipped" status
-		for _, job := range jobs {
-			uiApp.UpdateIngestRow(domainName, job.Row, "[red]🛑 Skipped[-]", "", "", "", "", "")
+			// Update domain controller port from 636 to 389 if needed
+			ldapDC := domainController
+			if strings.HasSuffix(domainController, ":636") {
+				ldapDC = strings.TrimSuffix(domainController, ":636") + ":389"
+			}
+
+			// Change scheme to LDAP
+			fallbackLdapOptions := *ldapOptions
+			fallbackLdapOptions.Scheme = "ldap"
+			ldapTarget := m.auth.NewTarget(fallbackLdapOptions.Scheme, ldapDC)
+
+			// Test LDAP connection
+			testCtx2, testCancel2 := context.WithTimeout(ctx, config.DEFAULT_LDAP_TIMEOUT)
+			defer testCancel2()
+
+			err2 := m.testLDAPConnection(testCtx2, ldapTarget, &fallbackLdapOptions)
+			if err2 == nil {
+				m.logFunc("✅ [green]LDAP fallback successful for \"%s\"[-]", domainName)
+				// Use the LDAP target and update domain controller for subsequent operations
+				target = ldapTarget
+				domainController = ldapDC
+				ldapOptions = &fallbackLdapOptions
+			} else {
+				m.logFunc("❌ [red]LDAP fallback also failed for \"%s\": %v[-]", domainName, err2)
+				m.logFunc("🛑 [red]Skipping ingestion of \"%s\"[-]", domainName)
+
+				// Update all rows to show "Skipped" status
+				for _, job := range jobs {
+					uiApp.UpdateIngestRow(domainName, job.Row, "[red]🛑 Skipped[-]", "", "", "", "", "")
+				}
+
+				return
+			}
+		} else {
+			m.logFunc("❌ [red]LDAP connection test failed for \"%s\": %v[-]", domainName, err)
+			m.logFunc("🛑 [red]Skipping ingestion of \"%s\"[-]", domainName)
+
+			// Update all rows to show "Skipped" status
+			for _, job := range jobs {
+				uiApp.UpdateIngestRow(domainName, job.Row, "[red]🛑 Skipped[-]", "", "", "", "", "")
+			}
+
+			return
 		}
-
-		return
 	}
 
 	m.logFunc("✅ [green]LDAP connection test successful for \"%s\"[-]", domainName)
@@ -419,7 +544,11 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 		wg.Add(1)
 		spinner.SetRunning(domainName, i, true)
 		go func(j gildap.QueryJob, jobIndex int) {
-			m.runJob(ctx, m.auth.Creds(), target, j, jobIndex, domainName, spinner, updates, &wg)
+			m.runJob(
+				ctx, m.auth.Creds(), target, ldapOptions,
+				j, jobIndex, domainName,
+				spinner, updates, &wg,
+			)
 		}(job, i)
 	}
 
@@ -475,8 +604,8 @@ func (m *IngestionManager) handleProgressUpdates(uiApp *ui.Application, updates 
 	}
 }
 
-func (m *IngestionManager) runJob(ctx context.Context, creds *adauth.Credential, target *adauth.Target, job gildap.QueryJob, jobIndex int, domainName string, spinner *ui.Spinner, updates chan gildap.ProgressUpdate, wg *sync.WaitGroup) {
-	conn, err := ldapauth.ConnectTo(ctx, creds, target, m.ldapAuthOptions)
+func (m *IngestionManager) runJob(ctx context.Context, creds *adauth.Credential, target *adauth.Target, ldapOptions *ldapauth.Options, job gildap.QueryJob, jobIndex int, domainName string, spinner *ui.Spinner, updates chan gildap.ProgressUpdate, wg *sync.WaitGroup) {
+	conn, err := ldapauth.ConnectTo(ctx, creds, target, ldapOptions)
 	if err != nil {
 		spinner.SetRunning(domainName, jobIndex, false)
 		updates <- gildap.ProgressUpdate{Row: job.Row, Err: err}
@@ -486,8 +615,10 @@ func (m *IngestionManager) runJob(ctx context.Context, creds *adauth.Credential,
 	defer conn.Close()
 
 	var entriesChan chan<- *ldap.Entry
-	if job.Name == "Trusts" && m.trustEntriesChan != nil {
+	if job.Name == "Trusts" {
 		entriesChan = m.trustEntriesChan
+	} else if job.Name == "Configuration" {
+		entriesChan = m.configEntriesChan
 	}
 
 	gildap.PagedSearchWorker(ctx, conn, job, updates, entriesChan, wg)

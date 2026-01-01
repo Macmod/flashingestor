@@ -21,9 +21,11 @@ type RuntimeOptions struct {
 	mu sync.RWMutex
 
 	Ingestion struct {
-		RecurseDomains      bool              `yaml:"recurse_domains"`
+		RecurseTrusts       bool              `yaml:"recurse_trusts"`
 		RecurseFeasibleOnly bool              `yaml:"recurse_feasible_only"`
 		IncludeACLs         bool              `yaml:"include_acls"`
+		SearchForest        bool              `yaml:"search_forest"`
+		LdapsToLdapFallback bool              `yaml:"ldaps_to_ldap_fallback"`
 		Queries             []QueryDefinition `yaml:"queries"`
 	} `yaml:"ingestion"`
 
@@ -45,9 +47,11 @@ func DefaultOptions() *RuntimeOptions {
 
 	// Ingestion defaults
 	opts.Ingestion.Queries = GetFallbackQueryDefinitions()
-	opts.Ingestion.RecurseDomains = true
+	opts.Ingestion.RecurseTrusts = true
 	opts.Ingestion.RecurseFeasibleOnly = true
 	opts.Ingestion.IncludeACLs = true
+	opts.Ingestion.SearchForest = true
+	opts.Ingestion.LdapsToLdapFallback = true
 
 	// Remote collection defaults
 	opts.RemoteCollection.Methods = GetFallbackRemoteMethods()
@@ -104,10 +108,10 @@ func (opts *RuntimeOptions) SaveOptions(configPath string) error {
 }
 
 // Thread-safe getters
-func (opts *RuntimeOptions) GetRecurseDomains() bool {
+func (opts *RuntimeOptions) GetRecurseTrusts() bool {
 	opts.mu.RLock()
 	defer opts.mu.RUnlock()
-	return opts.Ingestion.RecurseDomains
+	return opts.Ingestion.RecurseTrusts
 }
 
 func (opts *RuntimeOptions) GetRecurseFeasibleOnly() bool {
@@ -120,6 +124,18 @@ func (opts *RuntimeOptions) GetIncludeACLs() bool {
 	opts.mu.RLock()
 	defer opts.mu.RUnlock()
 	return opts.Ingestion.IncludeACLs
+}
+
+func (opts *RuntimeOptions) GetSearchForest() bool {
+	opts.mu.RLock()
+	defer opts.mu.RUnlock()
+	return opts.Ingestion.SearchForest
+}
+
+func (opts *RuntimeOptions) GetLdapsToLdapFallback() bool {
+	opts.mu.RLock()
+	defer opts.mu.RUnlock()
+	return opts.Ingestion.LdapsToLdapFallback
 }
 
 func (opts *RuntimeOptions) GetMergeRemote() bool {
@@ -177,16 +193,28 @@ func (opts *RuntimeOptions) GetEnabledMethods() []string {
 }
 
 // Thread-safe setters
-func (opts *RuntimeOptions) SetRecurseDomains(enabled bool) {
+func (opts *RuntimeOptions) SetRecurseTrusts(enabled bool) {
 	opts.mu.Lock()
 	defer opts.mu.Unlock()
-	opts.Ingestion.RecurseDomains = enabled
+	opts.Ingestion.RecurseTrusts = enabled
 }
 
 func (opts *RuntimeOptions) SetIncludeACLs(enabled bool) {
 	opts.mu.Lock()
 	defer opts.mu.Unlock()
 	opts.Ingestion.IncludeACLs = enabled
+}
+
+func (opts *RuntimeOptions) SetSearchForest(enabled bool) {
+	opts.mu.Lock()
+	defer opts.mu.Unlock()
+	opts.Ingestion.SearchForest = enabled
+}
+
+func (opts *RuntimeOptions) SetLdapsToLdapFallback(enabled bool) {
+	opts.mu.Lock()
+	defer opts.mu.Unlock()
+	opts.Ingestion.LdapsToLdapFallback = enabled
 }
 
 func (opts *RuntimeOptions) SetMergeRemote(enabled bool) {

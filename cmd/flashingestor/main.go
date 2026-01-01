@@ -97,12 +97,12 @@ func main() {
 		logFunc("🔗 [blue]Auth method (ingestion)[-]: " + cfg.ChosenAuthIngest)
 	}
 
-	if cfg.RuntimeOptions.GetRecurseDomains() {
+	if cfg.RuntimeOptions.GetRecurseTrusts() {
 		if !slices.Contains([]string{"Password", "NTHash", "Anonymous"}, cfg.ChosenAuthIngest) || cfg.IngestAuth.Kerberos() {
 			// Kerberos cross-realm auth should be feasible to implement,
 			// but I don't know how yet :)
-			logFunc("🫠 [yellow]RecurseDomains disabled (not supported for this auth method)[-]")
-			cfg.RuntimeOptions.SetRecurseDomains(false)
+			logFunc("🫠 [yellow]RecurseTrusts disabled (not supported for this auth method)[-]")
+			cfg.RuntimeOptions.SetRecurseTrusts(false)
 		}
 	}
 
@@ -116,8 +116,10 @@ func main() {
 		logFunc:             logFunc,
 		ingestedDomains:     &sync.Map{},
 		includeACLs:         cfg.RuntimeOptions.GetIncludeACLs(),
-		recurseDomains:      cfg.RuntimeOptions.GetRecurseDomains(),
+		recurseTrusts:       cfg.RuntimeOptions.GetRecurseTrusts(),
 		recurseFeasibleOnly: cfg.RuntimeOptions.GetRecurseFeasibleOnly(),
+		searchForest:        cfg.RuntimeOptions.GetSearchForest(),
+		ldapsToLdapFallback: cfg.RuntimeOptions.GetLdapsToLdapFallback(),
 	}
 
 	conversionMgr := newConversionManager(bhInst, logFunc)
