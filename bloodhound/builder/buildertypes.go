@@ -39,12 +39,14 @@ func (bo *BaseADObject) FromEntry(entry *gildap.LDAPEntry, entryType string) {
 		BState().EmptySDCount++
 	}
 
+	entryDomain := entry.GetDomainFromDN()
+
 	parsedACEs, isACLProtected, err := ParseBinaryACL(
-		entryType, entry.HasLAPS(), securityDescriptor,
+		entryType, entryDomain, entry.HasLAPS(), securityDescriptor,
 	)
 
 	if err == nil {
-		ResolveACETypes(&parsedACEs, BState().SIDCache, entry.GetDomainFromDN())
+		ResolveACETypes(&parsedACEs, BState().SIDCache, entryDomain)
 		bo.Aces = parsedACEs
 	}
 

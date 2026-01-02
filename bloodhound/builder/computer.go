@@ -151,10 +151,14 @@ func BuildComputerFromEntry(entry *gildap.LDAPEntry) (*Computer, bool) {
 	computer.Properties.IsACLProtected = computer.IsACLProtected
 
 	// Handle RBCD information
+	entryDomain := entry.GetDomainFromDN()
+	securityDescriptorRBCD := entry.GetAttrRawVal("msDS-AllowedToActOnBehalfOfOtherIdentity", nil)
+
 	parsedACLsOnBehalf, _, _ := ParseBinaryACL(
-		"computer", false,
-		entry.GetAttrRawVal("msDS-AllowedToActOnBehalfOfOtherIdentity", nil),
+		"computer", entryDomain, false,
+		securityDescriptorRBCD,
 	)
+
 	for _, delegated := range parsedACLsOnBehalf {
 		if delegated.RightName == "Owner" {
 			continue

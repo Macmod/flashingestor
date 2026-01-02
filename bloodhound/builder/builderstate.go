@@ -23,7 +23,7 @@ const (
 type State struct {
 	DomainControllers      map[string][]TypedPrincipal // Map of domain SID -> list of DCs
 	domainControllersMu    sync.RWMutex                // Protects DomainControllers
-	ObjectTypeGUIDMap      sync.Map                    // Thread-safe map[string]string
+	AttrGUIDMap            sync.Map                    // Thread-safe map[string]string
 	DomainSIDCache         *SimpleCache
 	SIDDomainCache         *SimpleCache
 	MemberCache            *StringCache
@@ -55,10 +55,7 @@ func BState() *State {
 }
 
 func (st *State) Init() {
-	st.ObjectTypeGUIDMap = sync.Map{}
-	for k, v := range gildap.OBJECT_TYPE_GUID_MAP {
-		st.ObjectTypeGUIDMap.Store(k, v)
-	}
+	st.AttrGUIDMap = sync.Map{}
 
 	st.EmptySDCount = 0
 
@@ -267,10 +264,7 @@ func (st *State) Clear() {
 	st.DomainControllers = make(map[string][]TypedPrincipal, 0)
 	st.domainControllersMu.Unlock()
 
-	st.ObjectTypeGUIDMap = sync.Map{}
-	for k, v := range gildap.OBJECT_TYPE_GUID_MAP {
-		st.ObjectTypeGUIDMap.Store(k, v)
-	}
+	st.AttrGUIDMap = sync.Map{}
 
 	st.AdminSDHolderHashCache = sync.Map{}
 

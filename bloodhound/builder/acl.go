@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	gildap "github.com/Macmod/flashingestor/ldap"
 	"github.com/TheManticoreProject/winacl/ace"
 	"github.com/TheManticoreProject/winacl/ace/aceflags"
 	"github.com/TheManticoreProject/winacl/ace/acetype"
@@ -175,9 +176,8 @@ func (r *ACE) ResolvePrincipal(sidCache *StringCache, objectDomain string) {
 
 	// If it's not in the SID cache, it means
 	// it was not obtained during the initial ingestion,
-	// therefore it shouldn't exist in this domain.
-
-	// TODO: If it's still not found, try to use the GC cache
+	// therefore it shouldn't exist in this domain, its forest,
+	// or any trusted domains (if recursion + searchforest are being used).
 
 	// Otherwise, fake it
 	r.PrincipalType = "Base"
@@ -197,7 +197,7 @@ var allowedTypesWrite = []string{
 }
 
 // ParseBinaryACL parses an AD object's DACL into ACEs
-func ParseBinaryACL(entryType string, hasLAPS bool, aclData []byte) ([]ACE, bool, error) {
+func ParseBinaryACL(entryType string, entryDomain string, hasLAPS bool, aclData []byte) ([]ACE, bool, error) {
 	if len(aclData) == 0 {
 		return nil, false, nil
 	}
@@ -246,8 +246,8 @@ func ParseBinaryACL(entryType string, hasLAPS bool, aclData []byte) ([]ACE, bool
 		//hasInheritedObjectTypePresent := (a.Header.Flags.RawValue & flags.ACCESS_CONTROL_OBJECT_TYPE_FLAG_INHERITED_OBJECT_TYPE_PRESENT) != 0
 
 		var entryTypeGUID string
-		if val, ok := BState().ObjectTypeGUIDMap.Load(entryType); ok {
-			entryTypeGUID = val.(string)
+		if val, ok := gildap.OBJECT_TYPE_GUID_MAP[entryType]; ok {
+			entryTypeGUID = val
 		}
 		inheritedObjectTypeGUID := a.AccessControlObjectType.InheritedObjectType.GUID.ToFormatD()
 		isAceInheritedFromCurrentType := isInherited && (strings.EqualFold(inheritedObjectTypeGUID, entryTypeGUID) || strings.EqualFold(inheritedObjectTypeGUID, ACEGuids["AllGuid"]))
@@ -334,9 +334,9 @@ func ParseBinaryACL(entryType string, hasLAPS bool, aclData []byte) ([]ACE, bool
 						ACEs = append(ACEs, newACE("AllExtendedRights", sidStr, isInherited, inheritanceHash, isPermissionForOwnerRightsSid, isInheritedPermissionForOwnerRightsSid))
 					} else {
 						objType := a.AccessControlObjectType.ObjectType.GUID.ToFormatD()
-						mcsGUID, _ := BState().ObjectTypeGUIDMap.Load("ms-mcs-admpwd")
-						lapsGUID, _ := BState().ObjectTypeGUIDMap.Load("ms-laps-password")
-						encryptedGUID, _ := BState().ObjectTypeGUIDMap.Load("ms-laps-encryptedpassword")
+						mcsGUID, _ := BState().AttrGUIDMap.Load(entryDomain + "+ms-mcs-admpwd")
+						lapsGUID, _ := BState().AttrGUIDMap.Load(entryDomain + "+ms-laps-password")
+						encryptedGUID, _ := BState().AttrGUIDMap.Load(entryDomain + "+ms-laps-encryptedpassword")
 
 						if (mcsGUID != nil && strings.EqualFold(objType, mcsGUID.(string))) ||
 							(lapsGUID != nil && strings.EqualFold(objType, lapsGUID.(string))) ||
