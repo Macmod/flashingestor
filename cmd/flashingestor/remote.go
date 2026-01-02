@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"strings"
 	"time"
 
 	"github.com/Macmod/flashingestor/bloodhound"
@@ -21,7 +23,31 @@ func newRemoteCollectionManager(
 	auth *config.CredentialMgr,
 	logFunc func(string, ...interface{}),
 ) *RemoteCollectionManager {
-	return &RemoteCollectionManager{bhInst: bhInst, auth: auth, logFunc: logFunc}
+	return &RemoteCollectionManager{
+		bhInst:  bhInst,
+		auth:    auth,
+		logFunc: logFunc,
+	}
+}
+
+// checkMsgpackFilesExist checks if any .msgpack files exist in the remote folder
+func (r *RemoteCollectionManager) checkMsgpackFilesExist() (bool, error) {
+	remoteFolder := r.bhInst.ActiveFolder
+	entries, err := os.ReadDir(remoteFolder)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(strings.ToLower(entry.Name()), ".msgpack") {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (r *RemoteCollectionManager) start(uiApp *ui.Application) {

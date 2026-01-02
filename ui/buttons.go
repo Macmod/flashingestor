@@ -72,6 +72,29 @@ func (app *Application) showConfirmModal(title, message string, onConfirm func()
 	app.mainPages.AddPage("modal", modal, true, true)
 }
 
+// ShowYesNoModal displays a yes/no confirmation dialog and calls the appropriate callback
+func (app *Application) ShowYesNoModal(title, message string, onYes func(), onNo func()) {
+	modal := tview.NewModal().
+		SetText(message).
+		AddButtons([]string{"Yes", "No"}).
+		SetButtonStyle(tcell.StyleDefault.Background(tcell.ColorBlue).Foreground(tcell.ColorBlack)).
+		SetButtonActivatedStyle(tcell.StyleDefault.Background(tcell.ColorWhite).Foreground(tcell.ColorBlue)).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			// Remove the modal page
+			app.mainPages.RemovePage("modal")
+			if buttonLabel == "Yes" && onYes != nil {
+				onYes()
+			} else if buttonLabel == "No" && onNo != nil {
+				onNo()
+			}
+		})
+
+	modal.SetBorder(true).SetTitle(title)
+
+	// Add modal as an overlay
+	app.mainPages.AddPage("modal", modal, true, true)
+}
+
 // SetRunning enables or disables all buttons based on whether an operation is running
 func (app *Application) SetRunning(running bool, operationName string) {
 	app.isRunning = running

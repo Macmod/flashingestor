@@ -151,6 +151,38 @@ func main() {
 
 	if !disableIngest {
 		ingestionCallback = func() {
+			// Check if prompt_msgpack_overwrite is enabled
+			if cfg.RuntimeOptions.GetPromptMsgpackOverwrite() {
+				// Check if any msgpack files exist
+				hasFiles, err := ingestMgr.checkMsgpackFilesExist()
+				if err != nil {
+					logFunc("🫠 [yellow]Warning: Failed to check for existing msgpack files: %v[-]", err)
+				} else if hasFiles {
+					// Show modal asking user if they want to overwrite
+					uiApp.ShowYesNoModal(
+						"Overwrite Existing Data?",
+						"Existing .msgpack files detected in the LDAP output folder.\nDo you want to overwrite them?",
+						func() {
+							// User chose Yes - proceed with ingestion
+							// Reset ingested domains tracker for new run
+							ingestMgr.ingestedDomains = &sync.Map{}
+
+							// Mark initial domain as ingested
+							ingestMgr.ingestedDomains.Store(strings.ToUpper(initialDomain), true)
+
+							ctx := context.Background()
+							ingestMgr.start(ctx, uiApp, initialDomain, initialBaseDN, initialDC)
+						},
+						func() {
+							// User chose No - cancel ingestion
+							logFunc("🛑 [yellow]Ingestion cancelled by user (existing files will not be overwritten)[-]")
+						},
+					)
+					return
+				}
+			}
+
+			// No prompt needed or no existing files - proceed with ingestion
 			// Reset ingested domains tracker for new run
 			ingestMgr.ingestedDomains = &sync.Map{}
 
@@ -164,6 +196,31 @@ func main() {
 
 	if !disableRemote {
 		remoteCollectionCallback = func() {
+			// Check if prompt_msgpack_overwrite is enabled
+			if cfg.RuntimeOptions.GetPromptMsgpackOverwrite() {
+				// Check if any msgpack files exist
+				hasFiles, err := remoteMgr.checkMsgpackFilesExist()
+				if err != nil {
+					logFunc("🫠 [yellow]Warning: Failed to check for existing msgpack files: %v[-]", err)
+				} else if hasFiles {
+					// Show modal asking user if they want to overwrite
+					uiApp.ShowYesNoModal(
+						"Overwrite Existing Data?",
+						"Existing .msgpack files detected in the remote collection output folder.\nDo you want to overwrite them?",
+						func() {
+							// User chose Yes - proceed with remote collection
+							remoteMgr.start(uiApp)
+						},
+						func() {
+							// User chose No - cancel remote collection
+							logFunc("🛑 [yellow]Remote collection cancelled by user (existing files will not be overwritten)[-]")
+						},
+					)
+					return
+				}
+			}
+
+			// No prompt needed or no existing files - proceed with remote collection
 			remoteMgr.start(uiApp)
 		}
 	}

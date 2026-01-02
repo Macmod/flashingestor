@@ -1,8 +1,18 @@
 package config
 
-// GetFallbackQueryDefinitions returns hardcoded query definitions to use when config.yaml cannot be loaded
-func GetFallbackQueryDefinitions() []QueryDefinition {
-	return []QueryDefinition{
+// FallbackOptions returns default runtime options
+func FallbackOptions() *RuntimeOptions {
+	opts := &RuntimeOptions{}
+
+	// Ingestion defaults
+	opts.Ingestion.RecurseTrusts = true
+	opts.Ingestion.RecurseFeasibleOnly = true
+	opts.Ingestion.IncludeACLs = true
+	opts.Ingestion.SearchForest = true
+	opts.Ingestion.LdapsToLdapFallback = true
+	opts.Ingestion.PromptMsgpackOverwrite = true
+
+	opts.Ingestion.Queries = []QueryDefinition{
 		{
 			Name:   "Configuration",
 			Filter: "(objectClass=*)",
@@ -120,11 +130,9 @@ func GetFallbackQueryDefinitions() []QueryDefinition {
 			PageSize: 1000,
 		},
 	}
-}
 
-// GetFallbackRemoteMethods returns the default remote collection methods
-func GetFallbackRemoteMethods() []string {
-	return []string{
+	// Remote collection defaults
+	opts.RemoteCollection.Methods = []string{
 		"userrights",
 		"dcregistry",
 		"sessions",
@@ -135,22 +143,12 @@ func GetFallbackRemoteMethods() []string {
 		"webclient",
 		"localgroups",
 	}
-}
 
-// ConversionOptions holds default conversion settings
-type ConversionOptions struct {
-	MergeRemote             bool
-	WriterBufsize           int
-	CompressOutput          bool
-	CleanupAfterCompression bool
-}
+	// Conversion defaults
+	opts.Conversion.MergeRemote = true
+	opts.Conversion.WriterBufsize = 33554432 // 32MB
+	opts.Conversion.CompressOutput = true
+	opts.Conversion.CleanupAfterCompression = true
 
-// GetFallbackConversionOpts returns the default conversion options
-func GetFallbackConversionOpts() ConversionOptions {
-	return ConversionOptions{
-		MergeRemote:             true,
-		WriterBufsize:           33554432, // 32MB
-		CompressOutput:          true,
-		CleanupAfterCompression: true,
-	}
+	return opts
 }

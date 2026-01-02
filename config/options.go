@@ -21,12 +21,13 @@ type RuntimeOptions struct {
 	mu sync.RWMutex
 
 	Ingestion struct {
-		RecurseTrusts       bool              `yaml:"recurse_trusts"`
-		RecurseFeasibleOnly bool              `yaml:"recurse_feasible_only"`
-		IncludeACLs         bool              `yaml:"include_acls"`
-		SearchForest        bool              `yaml:"search_forest"`
-		LdapsToLdapFallback bool              `yaml:"ldaps_to_ldap_fallback"`
-		Queries             []QueryDefinition `yaml:"queries"`
+		RecurseTrusts          bool              `yaml:"recurse_trusts"`
+		RecurseFeasibleOnly    bool              `yaml:"recurse_feasible_only"`
+		IncludeACLs            bool              `yaml:"include_acls"`
+		SearchForest           bool              `yaml:"search_forest"`
+		LdapsToLdapFallback    bool              `yaml:"ldaps_to_ldap_fallback"`
+		PromptMsgpackOverwrite bool              `yaml:"prompt_msgpack_overwrite"`
+		Queries                []QueryDefinition `yaml:"queries"`
 	} `yaml:"ingestion"`
 
 	RemoteCollection struct {
@@ -41,48 +42,23 @@ type RuntimeOptions struct {
 	} `yaml:"conversion"`
 }
 
-// DefaultOptions returns default runtime options
-func DefaultOptions() *RuntimeOptions {
-	opts := &RuntimeOptions{}
-
-	// Ingestion defaults
-	opts.Ingestion.Queries = GetFallbackQueryDefinitions()
-	opts.Ingestion.RecurseTrusts = true
-	opts.Ingestion.RecurseFeasibleOnly = true
-	opts.Ingestion.IncludeACLs = true
-	opts.Ingestion.SearchForest = true
-	opts.Ingestion.LdapsToLdapFallback = true
-
-	// Remote collection defaults
-	opts.RemoteCollection.Methods = GetFallbackRemoteMethods()
-
-	// Conversion defaults
-	convOpts := GetFallbackConversionOpts()
-	opts.Conversion.MergeRemote = convOpts.MergeRemote
-	opts.Conversion.WriterBufsize = convOpts.WriterBufsize
-	opts.Conversion.CompressOutput = convOpts.CompressOutput
-	opts.Conversion.CleanupAfterCompression = convOpts.CleanupAfterCompression
-
-	return opts
-}
-
 // LoadOptions loads options from a YAML file, or returns defaults if file doesn't exist
 func LoadOptions(configPath string) (*RuntimeOptions, error) {
 	// If no config path provided, return defaults
 	if configPath == "" {
-		return DefaultOptions(), nil
+		return FallbackOptions(), nil
 	}
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// File doesn't exist, return defaults
-			return DefaultOptions(), nil
+			return FallbackOptions(), nil
 		}
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	opts := DefaultOptions()
+	opts := FallbackOptions()
 	if err := yaml.Unmarshal(data, opts); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
@@ -136,6 +112,12 @@ func (opts *RuntimeOptions) GetLdapsToLdapFallback() bool {
 	opts.mu.RLock()
 	defer opts.mu.RUnlock()
 	return opts.Ingestion.LdapsToLdapFallback
+}
+
+func (opts *RuntimeOptions) GetPromptMsgpackOverwrite() bool {
+	opts.mu.RLock()
+	defer opts.mu.RUnlock()
+	return opts.Ingestion.PromptMsgpackOverwrite
 }
 
 func (opts *RuntimeOptions) GetMergeRemote() bool {
@@ -215,6 +197,12 @@ func (opts *RuntimeOptions) SetLdapsToLdapFallback(enabled bool) {
 	opts.mu.Lock()
 	defer opts.mu.Unlock()
 	opts.Ingestion.LdapsToLdapFallback = enabled
+}
+
+func (opts *RuntimeOptions) SetPromptMsgpackOverwrite(enabled bool) {
+	opts.mu.Lock()
+	defer opts.mu.Unlock()
+	opts.Ingestion.PromptMsgpackOverwrite = enabled
 }
 
 func (opts *RuntimeOptions) SetMergeRemote(enabled bool) {

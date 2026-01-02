@@ -156,6 +156,38 @@ func (m *IngestionManager) testLDAPConnection(
 	return rootDN, nil
 }
 
+// checkMsgpackFilesExist checks if any .msgpack files exist in the LDAP folder
+func (m *IngestionManager) checkMsgpackFilesExist() (bool, error) {
+	entries, err := os.ReadDir(m.ldapFolder)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	// Check for .msgpack files in the root ldap folder or any subdirectories
+	for _, entry := range entries {
+		if entry.IsDir() {
+			// Check subdirectories for msgpack files
+			subDir := filepath.Join(m.ldapFolder, entry.Name())
+			subEntries, err := os.ReadDir(subDir)
+			if err != nil {
+				continue
+			}
+			for _, subEntry := range subEntries {
+				if !subEntry.IsDir() && strings.HasSuffix(strings.ToLower(subEntry.Name()), ".msgpack") {
+					return true, nil
+				}
+			}
+		} else if strings.HasSuffix(strings.ToLower(entry.Name()), ".msgpack") {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 func (m *IngestionManager) start(
 	ctx context.Context,
 	uiApp *ui.Application,
