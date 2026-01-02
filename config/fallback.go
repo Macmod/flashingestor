@@ -11,6 +11,7 @@ func FallbackOptions() *RuntimeOptions {
 	opts.Ingestion.SearchForest = true
 	opts.Ingestion.LdapsToLdapFallback = true
 	opts.Ingestion.PromptMsgpackOverwrite = true
+	opts.Ingestion.AppendForestDomains = true
 
 	opts.Ingestion.Queries = []QueryDefinition{
 		{

@@ -8,6 +8,8 @@ ingestion:
   recurse_feasible_only: true
   search_forest: true 
   ldaps_to_ldap_fallback: true
+  prompt_msgpack_overwrite: true
+  append_forest_domains: true
   queries:
     - name: Configuration
       filter: "(objectClass=*)"

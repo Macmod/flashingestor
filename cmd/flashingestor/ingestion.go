@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -48,6 +49,7 @@ type IngestionManager struct {
 	trustEntriesChan    chan *ldap.Entry
 	configEntriesChan   chan *ldap.Entry
 	ingestedDomains     *sync.Map // tracks domains processed in current run
+	forestStructure     *sync.Map // maps domain names to their forest root domain names
 	startTime           time.Time
 	domainCount         atomic.Int32 // tracks number of domains ingested
 	pendingDomains      atomic.Int32 // tracks domains queued but not yet completed
@@ -57,6 +59,7 @@ type IngestionManager struct {
 	searchForest        bool         // whether to search the forest configuration partition for additional domains
 	includeACLs         bool         // whether to include nTSecurityDescriptor
 	ldapsToLdapFallback bool         // whether to fallback from LDAPS to LDAP on connection failure
+	appendForestDomains bool         // whether to append to existing forest domains file
 	initialDomain       string       // the initial domain that started the ingestion
 }
 
@@ -211,6 +214,23 @@ func (m *IngestionManager) start(
 	m.pendingDomains.Store(0)
 	m.globalAborted.Store(false)
 	m.initialDomain = strings.ToUpper(initialDomain)
+	m.forestStructure = &sync.Map{}
+
+	// Load existing forest domains if append mode is enabled
+	if m.appendForestDomains {
+		forestFile := filepath.Join(m.ldapFolder, "ForestDomains.json")
+		if file, err := os.Open(forestFile); err == nil {
+			defer file.Close()
+			var existingForest map[string]string
+			decoder := json.NewDecoder(file)
+			if err := decoder.Decode(&existingForest); err == nil {
+				for domain, forestRoot := range existingForest {
+					m.forestStructure.Store(domain, forestRoot)
+				}
+				m.logFunc("📂 [blue]Loaded %d existing forest domain mapping(s)[-]", len(existingForest))
+			}
+		}
+	}
 
 	m.startTime = time.Now()
 	if m.recurseTrusts {
@@ -242,8 +262,34 @@ func (m *IngestionManager) start(
 			m.ingestDomain(ctx, uiApp, req.DomainName, req.BaseDN, req.DomainController)
 		}
 
-		// All domains have been processed, log final summary
+		// All domains have been processed, write forest structure and log final summary
 		if m.domainCount.Load() > 0 {
+			// Write forest structure to file
+			forestMap := make(map[string]string)
+			m.forestStructure.Range(func(key, value interface{}) bool {
+				forestMap[key.(string)] = value.(string)
+				return true
+			})
+
+			if len(forestMap) > 0 {
+				forestFile := filepath.Join(m.ldapFolder, "ForestDomains.json")
+				file, err := os.Create(forestFile)
+				if err != nil {
+					m.logFunc("🫠 [yellow]Failed to create forest structure file: %v[-]", err)
+				} else {
+					defer file.Close()
+					encoder := json.NewEncoder(file)
+					encoder.SetIndent("", "  ")
+					if err := encoder.Encode(forestMap); err != nil {
+						m.logFunc("🫠 [yellow]Failed to write forest structure: %v[-]", err)
+					} else {
+						if fileInfo, err := os.Stat(forestFile); err == nil {
+							m.logFunc("✅ Saved %s (%s)", forestFile, core.FormatFileSize(fileInfo.Size()))
+						}
+					}
+				}
+			}
+
 			totalDuration := time.Since(m.startTime)
 			m.logFunc("🕝 [blue]Ingested %d domain(s) in %s[-]", m.domainCount.Load(), core.FormatDuration(totalDuration))
 		} else {
@@ -589,10 +635,12 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 
 	m.logFunc("✅ [green]LDAP connection test successful for \"%s\"[-]", domainName)
 	if rootDN != "" {
+		forestRoot := gildap.DistinguishedNameToDomain(rootDN)
+		m.forestStructure.Store(strings.ToUpper(domainName), strings.ToUpper(forestRoot))
 		if strings.EqualFold(baseDN, rootDN) {
 			m.logFunc("🔗 [blue]Domain \"%s\" is the root of its' forest[-]", domainName)
 		} else {
-			m.logFunc("🔗 [blue]Forest root for \"%s\"[-]: \"%s\"", domainName, gildap.DistinguishedNameToDomain(rootDN))
+			m.logFunc("🔗 [blue]Forest root for \"%s\"[-]: \"%s\"", domainName, forestRoot)
 		}
 	}
 

@@ -27,6 +27,7 @@ type RuntimeOptions struct {
 		SearchForest           bool              `yaml:"search_forest"`
 		LdapsToLdapFallback    bool              `yaml:"ldaps_to_ldap_fallback"`
 		PromptMsgpackOverwrite bool              `yaml:"prompt_msgpack_overwrite"`
+		AppendForestDomains    bool              `yaml:"append_forest_domains"`
 		Queries                []QueryDefinition `yaml:"queries"`
 	} `yaml:"ingestion"`
 
@@ -120,6 +121,12 @@ func (opts *RuntimeOptions) GetPromptMsgpackOverwrite() bool {
 	return opts.Ingestion.PromptMsgpackOverwrite
 }
 
+func (opts *RuntimeOptions) GetAppendForestDomains() bool {
+	opts.mu.RLock()
+	defer opts.mu.RUnlock()
+	return opts.Ingestion.AppendForestDomains
+}
+
 func (opts *RuntimeOptions) GetMergeRemote() bool {
 	opts.mu.RLock()
 	defer opts.mu.RUnlock()
@@ -203,6 +210,12 @@ func (opts *RuntimeOptions) SetPromptMsgpackOverwrite(enabled bool) {
 	opts.mu.Lock()
 	defer opts.mu.Unlock()
 	opts.Ingestion.PromptMsgpackOverwrite = enabled
+}
+
+func (opts *RuntimeOptions) SetAppendForestDomains(enabled bool) {
+	opts.mu.Lock()
+	defer opts.mu.Unlock()
+	opts.Ingestion.AppendForestDomains = enabled
 }
 
 func (opts *RuntimeOptions) SetMergeRemote(enabled bool) {

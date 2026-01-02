@@ -120,6 +120,7 @@ func main() {
 		recurseFeasibleOnly: cfg.RuntimeOptions.GetRecurseFeasibleOnly(),
 		searchForest:        cfg.RuntimeOptions.GetSearchForest(),
 		ldapsToLdapFallback: cfg.RuntimeOptions.GetLdapsToLdapFallback(),
+		appendForestDomains: cfg.RuntimeOptions.GetAppendForestDomains(),
 	}
 
 	conversionMgr := newConversionManager(bhInst, logFunc)
