@@ -66,18 +66,18 @@ func newJobManager() *JobManager {
 }
 
 // getBaseDNForQuery returns the appropriate base DN for a given query
-func getBaseDNForQuery(queryName, baseDN string) string {
+func getBaseDNForQuery(queryName, baseDN string, rootDN string) string {
 	switch queryName {
 	case "Schema":
-		return "CN=Schema,CN=Configuration," + baseDN
+		return "CN=Schema,CN=Configuration," + rootDN
 	case "Configuration":
-		return "CN=Configuration," + baseDN
+		return "CN=Configuration," + rootDN
 	default:
 		return baseDN
 	}
 }
 
-func (jm *JobManager) initializeJobs(baseDN, outputDir string, queryDefs []config.QueryDefinition, includeACLs bool, callback func(int, gildap.QueryJob)) []gildap.QueryJob {
+func (jm *JobManager) initializeJobs(outputDir string, queryDefs []config.QueryDefinition, includeACLs bool, callback func(int, gildap.QueryJob)) []gildap.QueryJob {
 	jm.jobs = make([]gildap.QueryJob, len(queryDefs))
 
 	for idx, def := range queryDefs {
@@ -92,7 +92,6 @@ func (jm *JobManager) initializeJobs(baseDN, outputDir string, queryDefs []confi
 
 		job := gildap.QueryJob{
 			Name:       def.Name,
-			BaseDN:     getBaseDNForQuery(def.Name, baseDN),
 			Filter:     def.Filter,
 			Attributes: attributes,
 			PageSize:   uint32(def.PageSize),
@@ -112,11 +111,12 @@ func (jm *JobManager) initializeJobs(baseDN, outputDir string, queryDefs []confi
 
 // IngestionManager methods
 // testLDAPConnection validates the LDAP connection with the provided credentials and target
+// and retrieves the RootDN from RootDSE.
 func (m *IngestionManager) testLDAPConnection(
 	ctx context.Context,
 	target *adauth.Target,
 	ldapOptions *ldapauth.Options,
-) error {
+) (string, error) {
 	var err error
 
 	creds := m.auth.Creds()
@@ -128,11 +128,32 @@ func (m *IngestionManager) testLDAPConnection(
 	// Test the connection
 	conn, err := ldapauth.ConnectTo(ctx, creds, target, ldapOptions)
 	if err != nil {
-		return fmt.Errorf("LDAP connection failed: %w", err)
+		return "", fmt.Errorf("LDAP connection failed: %w", err)
 	}
 	defer conn.Close()
 
-	return nil
+	// Query RootDSE to get the DN of the forest root
+	searchReq := ldap.NewSearchRequest(
+		"", // empty base DN for RootDSE
+		ldap.ScopeBaseObject,
+		ldap.NeverDerefAliases,
+		0, 0, false,
+		"(objectClass=*)",
+		[]string{"rootDomainNamingContext"},
+		nil,
+	)
+
+	searchRes, err := conn.Search(searchReq)
+	if err != nil {
+		return "", fmt.Errorf("RootDSE query failed: %w", err)
+	}
+
+	var rootDN string
+	if searchRes != nil && len(searchRes.Entries) > 0 {
+		rootDN = searchRes.Entries[0].GetAttributeValue("rootDomainNamingContext")
+	}
+
+	return rootDN, nil
 }
 
 func (m *IngestionManager) start(
@@ -234,7 +255,7 @@ func (m *IngestionManager) processConfigurationEntries() {
 		}
 
 		baseDN := m.inferBaseDN(domainName)
-		m.logFunc("🔗 [green]Domain found in forest of \"%s\": \"%s\"[-]", sourceDomain, domainName)
+		m.logFunc("🔗 [green]Domain found in forest of \"%s\"[-]: \"%s\"", sourceDomain, domainName)
 
 		m.pendingDomains.Add(1)
 		m.domainQueue <- DomainRequest{
@@ -407,7 +428,7 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 		return
 	}
 
-	jobs := m.jobManager.initializeJobs(baseDN, currentDomainFolder, m.queryDefs, m.includeACLs, nil)
+	jobs := m.jobManager.initializeJobs(currentDomainFolder, m.queryDefs, m.includeACLs, nil)
 	spinner := ui.NewSpinner(uiApp, jobs, 0)
 	spinner.RegisterDomain(domainName, uiApp.GetDomainTable(domainName))
 
@@ -479,7 +500,10 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 	testCtx, testCancel := context.WithTimeout(ctx, config.DEFAULT_LDAP_TIMEOUT)
 	defer testCancel()
 
-	err := m.testLDAPConnection(testCtx, target, ldapOptions)
+	var rootDN string
+	var err error
+
+	rootDN, err = m.testLDAPConnection(testCtx, target, ldapOptions)
 	if err != nil {
 		// Check if fallback is enabled and we're using LDAPS
 		if m.ldapsToLdapFallback && strings.EqualFold(ldapOptions.Scheme, "ldaps") {
@@ -500,15 +524,15 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 			testCtx2, testCancel2 := context.WithTimeout(ctx, config.DEFAULT_LDAP_TIMEOUT)
 			defer testCancel2()
 
-			err2 := m.testLDAPConnection(testCtx2, ldapTarget, &fallbackLdapOptions)
-			if err2 == nil {
+			rootDN, err = m.testLDAPConnection(testCtx2, ldapTarget, &fallbackLdapOptions)
+			if err == nil {
 				m.logFunc("✅ [green]LDAP fallback successful for \"%s\"[-]", domainName)
 				// Use the LDAP target and update domain controller for subsequent operations
 				target = ldapTarget
 				domainController = ldapDC
 				ldapOptions = &fallbackLdapOptions
 			} else {
-				m.logFunc("❌ [red]LDAP fallback also failed for \"%s\": %v[-]", domainName, err2)
+				m.logFunc("❌ [red]LDAP fallback also failed for \"%s\": %v[-]", domainName, err)
 				m.logFunc("🛑 [red]Skipping ingestion of \"%s\"[-]", domainName)
 
 				// Update all rows to show "Skipped" status
@@ -532,6 +556,13 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 	}
 
 	m.logFunc("✅ [green]LDAP connection test successful for \"%s\"[-]", domainName)
+	if rootDN != "" {
+		if strings.EqualFold(baseDN, rootDN) {
+			m.logFunc("🔗 [blue]Domain \"%s\" is the root of its' forest[-]", domainName)
+		} else {
+			m.logFunc("🔗 [blue]Forest root for \"%s\"[-]: \"%s\"", domainName, gildap.DistinguishedNameToDomain(rootDN))
+		}
+	}
 
 	m.logFunc("🚀 [cyan]Starting LDAP ingestion of \"%s\"...[-]", domainName)
 	/*
@@ -543,6 +574,9 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 	for i, job := range jobs {
 		wg.Add(1)
 		spinner.SetRunning(domainName, i, true)
+
+		job.BaseDN = getBaseDNForQuery(job.Name, baseDN, rootDN)
+
 		go func(j gildap.QueryJob, jobIndex int) {
 			m.runJob(
 				ctx, m.auth.Creds(), target, ldapOptions,

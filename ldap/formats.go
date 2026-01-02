@@ -93,3 +93,25 @@ func EncodeGUID(guid string) (string, error) {
 	result += tokens[4]
 	return result, nil
 }
+
+func DistinguishedNameToDomain(dn string) string {
+	// Convert DN to uppercase for consistent processing
+	dn = strings.ToUpper(dn)
+
+	// Find all DC= components
+	parts := strings.Split(dn, ",")
+	domainParts := []string{}
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "DC=") {
+			domainParts = append(domainParts, strings.TrimPrefix(part, "DC="))
+		}
+	}
+
+	if len(domainParts) == 0 {
+		return ""
+	}
+
+	return strings.Join(domainParts, ".")
+}
