@@ -141,6 +141,7 @@ func FallbackOptions() *RuntimeOptions {
 		"loggedon",
 		"ntlmregistry",
 		"caregistry",
+		"certservices",
 		"webclient",
 		"localgroups",
 	}

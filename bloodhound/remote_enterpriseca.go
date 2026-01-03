@@ -73,12 +73,16 @@ func (rc *RemoteCollector) CollectRemoteEnterpriseCA(ctx context.Context, target
 		targetHost = target.DNSHostName
 	}
 
+	if rc.RuntimeOptions.IsMethodEnabled("certservices") {
+		result.HttpEnrollmentEndpoints = rc.collectHttpEnrollmentEndpoints(ctx, target.CAName, targetHost)
+	}
+
 	if rc.RuntimeOptions.IsMethodEnabled("caregistry") {
 		//fmt.Fprintf(os.Stderr, "[blue]🛠️  Collecting Enterprise CA registry data from %s (%s)[-]\n", target.DNSHostName, target.IPAddress)
 		result.CARegistryData = rc.collectEnterpriseCARegistryData(ctx, target.CAName, targetHost, objectSid, target.Domain)
 		//fmt.Fprintf(os.Stderr, "[blue]🛠️  Collecting HTTPEnrollmentEndpoints CA registry data from %s (%s)[-]\n", target.DNSHostName, target.IPAddress)
-		result.HttpEnrollmentEndpoints = rc.collectHttpEnrollmentEndpoints(ctx, target.CAName, targetHost)
 	}
+
 	return result
 }
 

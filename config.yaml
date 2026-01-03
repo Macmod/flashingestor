@@ -176,6 +176,7 @@ remote_collection:
     - loggedon
     - ntlmregistry
     - caregistry
+    - certservices
     - webclient
     - localgroups
     - ldapservices 
