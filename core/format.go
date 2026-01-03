@@ -27,6 +27,7 @@ func FormatDuration(d time.Duration) string {
 	hours := int(d.Hours())
 	minutes := int(d.Minutes()) % 60
 	seconds := int(d.Seconds()) % 60
+	milliseconds := int(d.Milliseconds()) % 1000
 
 	var parts []string
 
@@ -55,7 +56,7 @@ func FormatDuration(d time.Duration) string {
 	}
 
 	if len(parts) == 0 {
-		return "0 seconds"
+		return fmt.Sprintf("%d milliseconds", milliseconds)
 	}
 
 	if len(parts) == 1 {
