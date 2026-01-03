@@ -146,6 +146,7 @@ func (s *Spinner) SetDone(row int) {
 // updateSpinners updates the spinner display for all running rows across all domains
 func (s *Spinner) updateSpinners() {
 	s.mutex.Lock()
+	defer s.mutex.Unlock()
 
 	// Check if any rows are running
 	hasRunning := false
@@ -157,30 +158,25 @@ func (s *Spinner) updateSpinners() {
 	}
 
 	if !hasRunning {
-		s.mutex.Unlock()
 		return
 	}
 
 	// Capture the spinner index for this update cycle
 	spinIdx := s.spinnerIndex
 	s.spinnerIndex++
-	s.mutex.Unlock()
 
-	s.app.QueueUpdateDraw(func() {
-		s.mutex.RLock()
-		defer s.mutex.RUnlock()
+	spin := SpinnerFrames[spinIdx%len(SpinnerFrames)]
+	status := fmt.Sprintf("[blue]%s Running", spin)
 
-		spin := SpinnerFrames[spinIdx%len(SpinnerFrames)]
-		status := fmt.Sprintf("[blue]%s Running", spin)
-
-		for domain, domainRows := range s.runningRows {
-			table, ok := s.tables[domain]
-			if !ok {
-				continue
-			}
-			for row := range domainRows {
-				table.GetCell(row, s.statusColumn).SetText(status)
-			}
+	for domain, domainRows := range s.runningRows {
+		table, ok := s.tables[domain]
+		if !ok {
+			continue
 		}
-	})
+		for row := range domainRows {
+			table.GetCell(row, s.statusColumn).SetText(status)
+		}
+	}
+
+	s.app.Draw()
 }
