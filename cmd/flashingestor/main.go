@@ -162,7 +162,7 @@ func main() {
 					// Show modal asking user if they want to overwrite
 					uiApp.ShowYesNoModal(
 						"Overwrite Existing Data?",
-						"Existing .msgpack files detected in the LDAP output folder.\nDo you want to overwrite them?",
+						"Existing msgpack files detected in the LDAP output folder.\nDo you want to overwrite them?",
 						func() {
 							// User chose Yes - proceed with ingestion
 							// Reset ingested domains tracker for new run
@@ -207,7 +207,7 @@ func main() {
 					// Show modal asking user if they want to overwrite
 					uiApp.ShowYesNoModal(
 						"Overwrite Existing Data?",
-						"Existing .msgpack files detected in the remote collection output folder.\nDo you want to overwrite them?",
+						"Existing msgpack files detected in the remote collection output folder.\nDo you want to overwrite them?",
 						func() {
 							// User chose Yes - proceed with remote collection
 							remoteMgr.start(uiApp)

@@ -54,22 +54,20 @@ func NewBHFilesMap() BHFilesMap {
 	}
 }
 
-func (bp *BHFilesMap) GetPath(ldapFolder string, fileKey string, domainName string) (string, error) {
-	fileName, ok := bp.Files[fileKey]
-	if !ok {
-		return "", fmt.Errorf("file key %s not found", fileKey)
-	}
-
-	return filepath.Join(ldapFolder, domainName, fileName), nil
-}
-
 func (bp *BHFilesMap) GetPaths(ldapFolder string, fileKey string) ([]string, error) {
 	fileName, ok := bp.Files[fileKey]
 	if !ok {
 		return nil, fmt.Errorf("file key %s not found", fileKey)
 	}
 
-	entries, err := filepath.Glob(filepath.Join(ldapFolder, "*", fileName))
+	var entries []string
+	var err error
+	if fileKey == "schema" || fileKey == "configuration" {
+		entries, err = filepath.Glob(filepath.Join(ldapFolder, "FOREST+*", fileName))
+	} else {
+		entries, err = filepath.Glob(filepath.Join(ldapFolder, "*", fileName))
+	}
+
 	return entries, err
 }
 
@@ -96,10 +94,7 @@ type BH struct {
 	writers                      map[string]*BHFormatWriter // Indexed by "timestamp_kind"
 }
 
-func (bh *BH) GetPath(fileKey string, domainName string) (string, error) {
-	return bh.FilesMap.GetPath(bh.LdapFolder, fileKey, domainName)
-}
-
+// GetPaths retrieves the file paths for a given logical file key within the LDAP data folder.
 func (bh *BH) GetPaths(fileKey string) ([]string, error) {
 	return bh.FilesMap.GetPaths(bh.LdapFolder, fileKey)
 }

@@ -24,16 +24,15 @@ type QueryJob struct {
 }
 
 type ProgressUpdate struct {
-	Row        int
-	Page       int
-	Total      int
-	Speed      float64
-	AvgSpeed   float64
-	Done       bool
-	Aborted    bool
-	Err        error
-	Elapsed    time.Duration
-	OutputFile string
+	Row      int
+	Page     int
+	Total    int
+	Speed    float64
+	AvgSpeed float64
+	Done     bool
+	Aborted  bool
+	Err      error
+	Elapsed  time.Duration
 }
 
 // bufferedWriter writes entries as a single msgpack array without loading all into memory.
@@ -168,7 +167,7 @@ func PagedSearchWorker(
 		}
 
 		if lastUpdate == nil {
-			updates <- ProgressUpdate{Row: job.Row, Done: true, Total: total, Elapsed: time.Since(startTime), OutputFile: job.OutputFile}
+			updates <- ProgressUpdate{Row: job.Row, Done: true, Total: total, Elapsed: time.Since(startTime)}
 		} else {
 			updates <- *lastUpdate
 		}
@@ -177,7 +176,7 @@ func PagedSearchWorker(
 	for {
 		select {
 		case <-ctx.Done():
-			lastUpdate = &ProgressUpdate{Row: job.Row, Aborted: true, Total: total, Elapsed: time.Since(startTime), OutputFile: job.OutputFile}
+			lastUpdate = &ProgressUpdate{Row: job.Row, Aborted: true, Total: total, Elapsed: time.Since(startTime)}
 			return
 		default:
 		}
@@ -201,7 +200,7 @@ func PagedSearchWorker(
 		sr, err := conn.Search(searchReq)
 		if err != nil {
 			if ctx.Err() != nil {
-				lastUpdate = &ProgressUpdate{Row: job.Row, Aborted: true, Total: total, Elapsed: time.Since(startTime), OutputFile: job.OutputFile}
+				lastUpdate = &ProgressUpdate{Row: job.Row, Aborted: true, Total: total, Elapsed: time.Since(startTime)}
 			} else {
 				lastUpdate = &ProgressUpdate{Row: job.Row, Err: err}
 			}

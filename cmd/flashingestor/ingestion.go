@@ -68,19 +68,7 @@ func newJobManager() *JobManager {
 	return &JobManager{}
 }
 
-// getBaseDNForQuery returns the appropriate base DN for a given query
-func getBaseDNForQuery(queryName, baseDN string, rootDN string) string {
-	switch queryName {
-	case "Schema":
-		return "CN=Schema,CN=Configuration," + rootDN
-	case "Configuration":
-		return "CN=Configuration," + rootDN
-	default:
-		return baseDN
-	}
-}
-
-func (jm *JobManager) initializeJobs(outputDir string, queryDefs []config.QueryDefinition, includeACLs bool, callback func(int, gildap.QueryJob)) []gildap.QueryJob {
+func (jm *JobManager) initializeJobs(queryDefs []config.QueryDefinition, includeACLs bool, callback func(int, gildap.QueryJob)) []gildap.QueryJob {
 	jm.jobs = make([]gildap.QueryJob, len(queryDefs))
 
 	for idx, def := range queryDefs {
@@ -99,7 +87,6 @@ func (jm *JobManager) initializeJobs(outputDir string, queryDefs []config.QueryD
 			Attributes: attributes,
 			PageSize:   uint32(def.PageSize),
 			Row:        idx + 1,
-			OutputFile: filepath.Join(outputDir, def.Name+".msgpack"),
 		}
 
 		jm.jobs[idx] = job
@@ -159,6 +146,56 @@ func (m *IngestionManager) testLDAPConnection(
 	return rootDN, nil
 }
 
+// loadForestDomains loads existing forest domain mappings from ForestDomains.json
+func (m *IngestionManager) loadForestDomains() {
+	forestFile := filepath.Join(m.ldapFolder, "ForestDomains.json")
+	file, err := os.Open(forestFile)
+	if err != nil {
+		return // File doesn't exist or can't be opened, skip loading
+	}
+	defer file.Close()
+
+	var existingForest map[string]string
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&existingForest); err == nil {
+		for domain, forestRoot := range existingForest {
+			m.forestStructure.Store(domain, forestRoot)
+		}
+		m.logFunc("📂 [blue]Loaded %d existing forest domain mapping(s)[-]", len(existingForest))
+	}
+}
+
+// saveForestDomains saves the current forest domain mappings to ForestDomains.json
+func (m *IngestionManager) saveForestDomains() {
+	forestMap := make(map[string]string)
+	m.forestStructure.Range(func(key, value interface{}) bool {
+		forestMap[key.(string)] = value.(string)
+		return true
+	})
+
+	if len(forestMap) == 0 {
+		return // Nothing to save
+	}
+
+	forestFile := filepath.Join(m.ldapFolder, "ForestDomains.json")
+	file, err := os.Create(forestFile)
+	if err != nil {
+		m.logFunc("🫠 [yellow]Failed to create forest structure file: %v[-]", err)
+		return
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(forestMap); err != nil {
+		m.logFunc("🫠 [yellow]Failed to write forest structure: %v[-]", err)
+	} else {
+		if fileInfo, err := os.Stat(forestFile); err == nil {
+			m.logFunc("✅ Saved %s (%s)", forestFile, core.FormatFileSize(fileInfo.Size()))
+		}
+	}
+}
+
 // checkMsgpackFilesExist checks if any .msgpack files exist in the LDAP folder
 func (m *IngestionManager) checkMsgpackFilesExist() (bool, error) {
 	entries, err := os.ReadDir(m.ldapFolder)
@@ -216,21 +253,8 @@ func (m *IngestionManager) start(
 	m.initialDomain = strings.ToUpper(initialDomain)
 	m.forestStructure = &sync.Map{}
 
-	// Load existing forest domains if append mode is enabled
-	if m.appendForestDomains {
-		forestFile := filepath.Join(m.ldapFolder, "ForestDomains.json")
-		if file, err := os.Open(forestFile); err == nil {
-			defer file.Close()
-			var existingForest map[string]string
-			decoder := json.NewDecoder(file)
-			if err := decoder.Decode(&existingForest); err == nil {
-				for domain, forestRoot := range existingForest {
-					m.forestStructure.Store(domain, forestRoot)
-				}
-				m.logFunc("📂 [blue]Loaded %d existing forest domain mapping(s)[-]", len(existingForest))
-			}
-		}
-	}
+	// Load existing forest domains
+	m.loadForestDomains()
 
 	m.startTime = time.Now()
 	if m.recurseTrusts {
@@ -249,6 +273,10 @@ func (m *IngestionManager) start(
 		SourceDomain:     "",
 	}
 
+	if !m.appendForestDomains {
+		m.forestStructure = &sync.Map{}
+	}
+
 	go func() {
 		for req := range m.domainQueue {
 			// Check if abort was requested before processing next domain
@@ -264,31 +292,7 @@ func (m *IngestionManager) start(
 
 		// All domains have been processed, write forest structure and log final summary
 		if m.domainCount.Load() > 0 {
-			// Write forest structure to file
-			forestMap := make(map[string]string)
-			m.forestStructure.Range(func(key, value interface{}) bool {
-				forestMap[key.(string)] = value.(string)
-				return true
-			})
-
-			if len(forestMap) > 0 {
-				forestFile := filepath.Join(m.ldapFolder, "ForestDomains.json")
-				file, err := os.Create(forestFile)
-				if err != nil {
-					m.logFunc("🫠 [yellow]Failed to create forest structure file: %v[-]", err)
-				} else {
-					defer file.Close()
-					encoder := json.NewEncoder(file)
-					encoder.SetIndent("", "  ")
-					if err := encoder.Encode(forestMap); err != nil {
-						m.logFunc("🫠 [yellow]Failed to write forest structure: %v[-]", err)
-					} else {
-						if fileInfo, err := os.Stat(forestFile); err == nil {
-							m.logFunc("✅ Saved %s (%s)", forestFile, core.FormatFileSize(fileInfo.Size()))
-						}
-					}
-				}
-			}
+			m.saveForestDomains()
 
 			totalDuration := time.Since(m.startTime)
 			m.logFunc("🕝 [blue]Ingested %d domain(s) in %s[-]", m.domainCount.Load(), core.FormatDuration(totalDuration))
@@ -506,7 +510,7 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 		return
 	}
 
-	jobs := m.jobManager.initializeJobs(currentDomainFolder, m.queryDefs, m.includeACLs, nil)
+	jobs := m.jobManager.initializeJobs(m.queryDefs, m.includeACLs, nil)
 	spinner := ui.NewSpinner(uiApp, jobs, 0)
 	spinner.RegisterDomain(domainName, uiApp.GetDomainTable(domainName))
 
@@ -634,14 +638,28 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 	}
 
 	m.logFunc("✅ [green]LDAP connection test successful for \"%s\"[-]", domainName)
+	forestRoot := ""
+	forestRootFolder := ""
 	if rootDN != "" {
-		forestRoot := gildap.DistinguishedNameToDomain(rootDN)
+		forestRoot = gildap.DistinguishedNameToDomain(rootDN)
+		forestRootFolder = filepath.Join(m.ldapFolder, "FOREST+"+forestRoot)
+		if err := os.MkdirAll(forestRootFolder, 0755); err != nil {
+			m.logFunc("❌ Failed to create domain folder: %v", err)
+			return
+		}
+
+		// Store forest structure
 		m.forestStructure.Store(strings.ToUpper(domainName), strings.ToUpper(forestRoot))
+
+		// Tell the user about the forest root
 		if strings.EqualFold(baseDN, rootDN) {
 			m.logFunc("🔗 [blue]Domain \"%s\" is the root of its' forest[-]", domainName)
 		} else {
 			m.logFunc("🔗 [blue]Forest root for \"%s\"[-]: \"%s\"", domainName, forestRoot)
 		}
+
+	} else {
+		m.logFunc("🫠 [yellow]Could not determine forest root for \"%s\". Skipping forest-related ingestion...[-]", domainName)
 	}
 
 	m.logFunc("🚀 [cyan]Starting LDAP ingestion of \"%s\"...[-]", domainName)
@@ -652,11 +670,28 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 
 	var wg sync.WaitGroup
 	for i, job := range jobs {
+		// For forest-wide queries, save
+		// in forest root folder if available; otherwise, skip
+		// TODO: Mark as skipped in the table?
+		if job.Name == "Configuration" {
+			job.BaseDN = "CN=Configuration," + rootDN
+			job.OutputFile = filepath.Join(forestRootFolder, "Configuration.msgpack")
+			if forestRootFolder == "" {
+				continue
+			}
+		} else if job.Name == "Schema" {
+			job.BaseDN = "CN=Schema,CN=Configuration," + rootDN
+			job.OutputFile = filepath.Join(forestRootFolder, "Schema.msgpack")
+			if forestRootFolder == "" {
+				continue
+			}
+		} else {
+			job.BaseDN = baseDN
+			job.OutputFile = filepath.Join(currentDomainFolder, job.Name+".msgpack")
+		}
+
 		wg.Add(1)
 		spinner.SetRunning(domainName, i, true)
-
-		job.BaseDN = getBaseDNForQuery(job.Name, baseDN, rootDN)
-
 		go func(j gildap.QueryJob, jobIndex int) {
 			m.runJob(
 				ctx, m.auth.Creds(), target, ldapOptions,
@@ -678,8 +713,9 @@ func (m *IngestionManager) handleProgressUpdates(uiApp *ui.Application, updates 
 	errorCount := 0
 
 	for update := range updates {
+		elapsed := update.Elapsed.Round(10 * time.Millisecond).String()
 		if update.Aborted {
-			uiApp.UpdateIngestRow(domainName, update.Row, "[red]× Aborted", "", fmt.Sprintf("%d", update.Total), "", "", update.Elapsed.Round(time.Second).String())
+			uiApp.UpdateIngestRow(domainName, update.Row, "[red]× Aborted", "", fmt.Sprintf("%d", update.Total), "", "", elapsed)
 			continue
 		}
 
@@ -691,16 +727,17 @@ func (m *IngestionManager) handleProgressUpdates(uiApp *ui.Application, updates 
 		}
 
 		if update.Done {
-			uiApp.UpdateIngestRow(domainName, update.Row, "[green]✓ Done", "", fmt.Sprintf("%d", update.Total), "-", "", update.Elapsed.Round(time.Second).String())
-			if update.OutputFile != "" {
-				if fileInfo, err := os.Stat(update.OutputFile); err == nil {
-					m.logFunc("✅ Saved %s (%s)", update.OutputFile, core.FormatFileSize(fileInfo.Size()))
+			uiApp.UpdateIngestRow(domainName, update.Row, "[green]✓ Done", "", fmt.Sprintf("%d", update.Total), "-", "", elapsed)
+			outputFile := jobs[update.Row-1].OutputFile
+			if outputFile != "" {
+				if fileInfo, err := os.Stat(outputFile); err == nil {
+					m.logFunc("✅ Saved %s (%s)", outputFile, core.FormatFileSize(fileInfo.Size()))
 				} else {
-					m.logFunc("🫠 [yellow]Problem saving %s[-]", update.OutputFile)
+					m.logFunc("🫠 [yellow]Problem saving %s[-]", outputFile)
 				}
 			}
 		} else {
-			uiApp.UpdateIngestRow(domainName, update.Row, "", fmt.Sprintf("%d", update.Page), fmt.Sprintf("%d", update.Total), fmt.Sprintf("%.1f", update.Speed), fmt.Sprintf("%.1f", update.AvgSpeed), update.Elapsed.Round(time.Second).String())
+			uiApp.UpdateIngestRow(domainName, update.Row, "", fmt.Sprintf("%d", update.Page), fmt.Sprintf("%d", update.Total), fmt.Sprintf("%.1f", update.Speed), fmt.Sprintf("%.1f", update.AvgSpeed), elapsed)
 		}
 	}
 

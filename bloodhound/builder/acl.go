@@ -334,9 +334,12 @@ func ParseBinaryACL(entryType string, entryDomain string, hasLAPS bool, aclData 
 						ACEs = append(ACEs, newACE("AllExtendedRights", sidStr, isInherited, inheritanceHash, isPermissionForOwnerRightsSid, isInheritedPermissionForOwnerRightsSid))
 					} else {
 						objType := a.AccessControlObjectType.ObjectType.GUID.ToFormatD()
-						mcsGUID, _ := BState().AttrGUIDMap.Load(entryDomain + "+ms-mcs-admpwd")
-						lapsGUID, _ := BState().AttrGUIDMap.Load(entryDomain + "+ms-laps-password")
-						encryptedGUID, _ := BState().AttrGUIDMap.Load(entryDomain + "+ms-laps-encryptedpassword")
+
+						entryForest := BState().GetForestRoot(entryDomain)
+
+						mcsGUID, _ := BState().AttrGUIDMap.Load(entryForest + "+ms-mcs-admpwd")
+						lapsGUID, _ := BState().AttrGUIDMap.Load(entryForest + "+ms-laps-password")
+						encryptedGUID, _ := BState().AttrGUIDMap.Load(entryForest + "+ms-laps-encryptedpassword")
 
 						if (mcsGUID != nil && strings.EqualFold(objType, mcsGUID.(string))) ||
 							(lapsGUID != nil && strings.EqualFold(objType, lapsGUID.(string))) ||

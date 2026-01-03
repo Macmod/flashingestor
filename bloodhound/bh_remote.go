@@ -45,8 +45,9 @@ func (bh *BH) PerformRemoteCollection(auth *config.CredentialMgr) {
 	spinner.Start()
 	defer spinner.Stop()
 
-	// Initialize builder state if needed
-	builder.BState().Init()
+	// Initialize builder state
+	forestMapPath := filepath.Join(bh.LdapFolder, "ForestDomains.json")
+	builder.BState().Init(forestMapPath)
 
 	// Create remote collector with authentication options
 	collector := NewRemoteCollector(auth, bh.RuntimeOptions)

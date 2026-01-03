@@ -2,7 +2,9 @@ package builder
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -38,6 +40,7 @@ type State struct {
 	CacheWaitGroup         sync.WaitGroup
 	EmptySDCount           int
 	loadedCaches           map[string]bool
+	domainToForestMap      sync.Map
 }
 
 var bState *State
@@ -54,7 +57,41 @@ func BState() *State {
 	return bState
 }
 
-func (st *State) Init() {
+func (st *State) GetForestRoot(domain string) string {
+	if forestRoot, ok := st.domainToForestMap.Load(domain); ok {
+		return forestRoot.(string)
+	}
+
+	return ""
+}
+
+func (st *State) loadDomainToForestMap(path string) {
+	st.domainToForestMap = sync.Map{}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return // File doesn't exist or can't be opened
+	}
+	defer file.Close()
+
+	var forestMap map[string]string
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&forestMap); err != nil {
+		return // Failed to decode JSON
+	}
+
+	for domain, forestRoot := range forestMap {
+		st.domainToForestMap.Store(domain, forestRoot)
+	}
+}
+
+func (st *State) Init(forestMapPath string) {
+	if forestMapPath != "" {
+		st.loadDomainToForestMap(forestMapPath)
+	} else {
+		st.domainToForestMap = sync.Map{}
+	}
+
 	st.AttrGUIDMap = sync.Map{}
 
 	st.EmptySDCount = 0
