@@ -13,9 +13,6 @@ type ConversionUpdate struct {
 	Elapsed   string
 }
 
-// SetupConversion is a signal to setup the conversion table
-type SetupConversion struct{}
-
 // RemoteCollectionUpdate represents a progress update from the remote collection process
 type RemoteCollectionUpdate struct {
 	Step      int

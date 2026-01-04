@@ -87,7 +87,6 @@ func main() {
 		dirs.LDAP, dirs.Remote, dirs.BloodHound, resolver,
 		cfg.RemoteWorkers, cfg.DNSWorkers, cfg.RemoteTimeout, cfg.RuntimeOptions,
 		logChannel,
-		uiApp,
 	)
 
 	// Use RemoteAuthOptions for remote collection, fallback to StandardAuthOptions if not set

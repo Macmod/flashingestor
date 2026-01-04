@@ -12,7 +12,6 @@ import (
 
 	"github.com/Macmod/flashingestor/config"
 	"github.com/Macmod/flashingestor/core"
-	"github.com/Macmod/flashingestor/ui"
 )
 
 // CURRENT_BH_VER is the BloodHound JSON schema version this tool generates.
@@ -81,7 +80,6 @@ type BH struct {
 	OutputFolder                 string
 	ActiveFolder                 string
 	Log                          chan<- string
-	UIApp                        *ui.Application
 	RuntimeOptions               *config.RuntimeOptions
 	Resolver                     *net.Resolver
 	RemoteWorkers                int
@@ -103,7 +101,7 @@ func (bh *BH) GetPaths(fileKey string) ([]string, error) {
 }
 
 // Init initializes the BloodHound processor with necessary parameters
-func (bh *BH) Init(ldapFolder string, activeFolder string, outputFolder string, customResolver *net.Resolver, remoteWorkers int, dnsWorkers int, remoteTimeout time.Duration, runtimeOptions *config.RuntimeOptions, log chan<- string, uiApp *ui.Application) {
+func (bh *BH) Init(ldapFolder string, activeFolder string, outputFolder string, customResolver *net.Resolver, remoteWorkers int, dnsWorkers int, remoteTimeout time.Duration, runtimeOptions *config.RuntimeOptions, log chan<- string) {
 	bh.FilesMap = NewBHFilesMap()
 
 	bh.RemoteTimeout = remoteTimeout
@@ -111,7 +109,6 @@ func (bh *BH) Init(ldapFolder string, activeFolder string, outputFolder string, 
 	bh.DNSWorkers = dnsWorkers
 	bh.RemoteWriteBuff = 1000
 	bh.RuntimeOptions = runtimeOptions
-	bh.UIApp = uiApp
 	bh.Resolver = customResolver
 
 	bh.OutputFolder = outputFolder
