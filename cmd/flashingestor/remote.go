@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -61,8 +62,25 @@ func (r *RemoteCollectionManager) start(uiApp *ui.Application) {
 
 	r.logFunc("💻 [cyan]Starting remote collection...[-]")
 
+	// Create remote collection updates channel
+	remoteUpdates := make(chan core.RemoteCollectionUpdate, 1000)
+	r.bhInst.RemoteCollectionUpdates = remoteUpdates
+
+	// Setup UI table
+	uiApp.SetupRemoteCollectionTable()
+
+	// Start spinner for remote collection table
+	var spinner *ui.Spinner
+	spinner = ui.NewSingleTableSpinner(uiApp, uiApp.GetRemoteCollectTable(), 0)
+	spinner.Start()
+
+	// Start consumer for remote collection updates
+	go r.handleRemoteCollectionUpdates(remoteUpdates, spinner, uiApp)
+
 	go func() {
 		defer func() {
+			close(remoteUpdates)
+			spinner.Stop()
 			uiApp.SetAbortCallback(nil)
 			uiApp.SetRunning(false, "")
 		}()
@@ -77,4 +95,53 @@ func (r *RemoteCollectionManager) start(uiApp *ui.Application) {
 			r.logFunc("✅ [green]Remote collection completed in %s[-]", core.FormatDuration(processDuration))
 		}
 	}()
+}
+
+func (r *RemoteCollectionManager) handleRemoteCollectionUpdates(updates <-chan core.RemoteCollectionUpdate, spinner *ui.Spinner, uiApp *ui.Application) {
+	for update := range updates {
+		// Handle status changes
+		if update.Status == "running" {
+			if spinner != nil {
+				spinner.SetRunningRow(update.Step)
+			}
+			uiApp.UpdateRemoteCollectionRow(update.Step, "", "-", "-", "-", "-", "-", "-", "-")
+		} else if update.Status == "done" {
+			if spinner != nil {
+				spinner.SetDone(update.Step)
+			}
+			uiApp.UpdateRemoteCollectionRow(update.Step, "[green]✓ Done", "", "", "-", "", "-", "-", update.Elapsed)
+		} else if update.Status == "aborted" {
+			if spinner != nil {
+				spinner.SetDone(update.Step)
+			}
+			uiApp.UpdateRemoteCollectionRow(update.Step, "[red]× Aborted", "", "", "-", "", "-", "-", update.Elapsed)
+		} else {
+			// Progress update - format with colors
+			var processedText, percentText string
+
+			// Color based on completion
+			if update.Percent >= 100.0 || update.Processed == update.Total {
+				processedText = fmt.Sprintf("[green]%d/%d[-]", update.Processed, update.Total)
+				percentText = fmt.Sprintf("[green]%.1f%%[-]", update.Percent)
+			} else if update.Percent == 0 || update.Processed == 0 {
+				processedText = fmt.Sprintf("[yellow]%d/%d[-]", update.Processed, update.Total)
+				percentText = fmt.Sprintf("[yellow]%.1f%%[-]", update.Percent)
+			} else {
+				processedText = fmt.Sprintf("[blue]%d/%d[-]", update.Processed, update.Total)
+				percentText = fmt.Sprintf("[blue]%.1f%%[-]", update.Percent)
+			}
+
+			uiApp.UpdateRemoteCollectionRow(
+				update.Step,
+				"",
+				processedText,
+				percentText,
+				update.Speed,
+				update.AvgSpeed,
+				update.Success,
+				update.ETA,
+				update.Elapsed,
+			)
+		}
+	}
 }

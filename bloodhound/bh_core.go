@@ -91,6 +91,7 @@ type BH struct {
 	RemoteComputerCollection     map[string]*RemoteCollectionResult
 	RemoteEnterpriseCACollection map[string]*EnterpriseCARemoteCollectionResult
 	ConversionUpdates            chan<- core.ConversionUpdate
+	RemoteCollectionUpdates      chan<- core.RemoteCollectionUpdate
 	abortFlag                    atomic.Bool
 	generatedFiles               []string
 	writers                      map[string]*BHFormatWriter // Indexed by "timestamp_kind"

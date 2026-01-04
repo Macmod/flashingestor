@@ -7,16 +7,15 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
 	"github.com/Macmod/flashingestor/config"
+	"github.com/Macmod/flashingestor/core"
 	gildap "github.com/Macmod/flashingestor/ldap"
 	"github.com/Macmod/flashingestor/reader"
-	"github.com/Macmod/flashingestor/ui"
 	"github.com/go-ldap/ldap/v3"
 	"github.com/vmihailenco/msgpack"
 )
@@ -35,16 +34,10 @@ func NewRemoteCollector(authenticator *config.CredentialMgr, runtimeOptions *con
 	}
 }
 
+type RemoteCollectionUpdate = core.RemoteCollectionUpdate
+
 // PerformRemoteCollection gathers data from computers and CAs using RPC and HTTP.
 func (bh *BH) PerformRemoteCollection(auth *config.CredentialMgr) {
-	// Initialize remote collection UI
-	bh.UIApp.SetupRemoteCollectionTable()
-
-	var spinner *ui.Spinner
-	spinner = ui.NewSingleTableSpinner(bh.UIApp, bh.UIApp.GetRemoteCollectTable(), 0)
-	spinner.Start()
-	defer spinner.Stop()
-
 	// Initialize builder state
 	forestMapPath := filepath.Join(bh.LdapFolder, "ForestDomains.json")
 	builder.BState().Init(forestMapPath)
@@ -52,7 +45,7 @@ func (bh *BH) PerformRemoteCollection(auth *config.CredentialMgr) {
 	// Create remote collector with authentication options
 	collector := NewRemoteCollector(auth, bh.RuntimeOptions)
 
-	bh.runRemoteStep(spinner, 1, func() { bh.loadRemoteCollectionCache() })
+	bh.runRemoteStep(1, func() { bh.loadRemoteCollectionCache(1) })
 	if bh.IsAborted() {
 		return
 	}
@@ -63,48 +56,61 @@ func (bh *BH) PerformRemoteCollection(auth *config.CredentialMgr) {
 		return
 	}
 
-	bh.collectEnterpriseCAData(spinner, enterpriseCAs, collector)
+	bh.runRemoteStep(2, func() { bh.collectEnterpriseCAData(2, enterpriseCAs, collector) })
 	if bh.IsAborted() {
 		return
 	}
 
 	// Collect from computers
-	computers := bh.loadComputerTargets(spinner)
-	bh.Log <- fmt.Sprintf("🎯 About to perform active collection for %d computers", len(computers))
-	bh.collectComputerData(spinner, computers, collector)
-}
-
-// runRemoteStep runs a remote collection step and updates UI
-func (bh *BH) runRemoteStep(spinner *ui.Spinner, row int, stepFunc func()) {
+	var computers []CollectionTarget
+	bh.runRemoteStep(3, func() { computers = bh.loadComputerTargets(3) })
 	if bh.IsAborted() {
 		return
 	}
 
-	if spinner != nil {
-		spinner.SetRunningRow(row)
+	bh.Log <- fmt.Sprintf("🎯 About to perform active collection for %d computers", len(computers))
+	bh.runRemoteStep(4, func() { bh.collectComputerData(4, computers, collector) })
+}
+
+// runRemoteStep runs a remote collection step and sends progress events
+func (bh *BH) runRemoteStep(row int, stepFunc func()) {
+	if bh.IsAborted() {
+		return
 	}
-	bh.updateRemoteRow(row, "", "-", "-", "-", "-", "-", "-", "-")
+
+	if bh.RemoteCollectionUpdates != nil {
+		bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+			Step:   row,
+			Status: "running",
+		}
+	}
 
 	startTime := time.Now()
 	stepFunc()
 	elapsed := time.Since(startTime)
 
 	if bh.IsAborted() {
-		if spinner != nil {
-			spinner.SetDone(row)
+		if bh.RemoteCollectionUpdates != nil {
+			bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+				Step:    row,
+				Status:  "aborted",
+				Elapsed: elapsed.Round(time.Second).String(),
+			}
 		}
-		bh.updateRemoteRow(row, "[red]× Aborted", "", "", "-", "", "-", "-", elapsed.Round(time.Second).String())
 		return
 	}
 
-	if spinner != nil {
-		spinner.SetDone(row)
+	if bh.RemoteCollectionUpdates != nil {
+		bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+			Step:    row,
+			Status:  "done",
+			Elapsed: elapsed.Round(time.Second).String(),
+		}
 	}
-	bh.updateRemoteRow(row, "[green]✓ Done", "", "", "-", "", "-", "-", elapsed.Round(time.Second).String())
 }
 
 // loadRemoteCollectionCache loads necessary caches for remote collection
-func (bh *BH) loadRemoteCollectionCache() {
+func (bh *BH) loadRemoteCollectionCache(step int) {
 	startTime := time.Now()
 	lastUpdateTime := startTime
 	var lastCount int
@@ -162,62 +168,33 @@ func (bh *BH) loadRemoteCollectionCache() {
 	progressCallback := func(_ int, _ int) {
 		totalProcessed++
 
-		elapsed := time.Since(startTime)
-		var processedText string
-		var percentText string
-		var speedText string
-		var avgSpeedText string
-		var etaText string
-
-		if totalEntries > 0 {
-			if totalProcessed >= totalEntries {
-				processedText = fmt.Sprintf("[green]%d/%d[-]", totalProcessed, totalEntries)
-			} else {
-				processedText = fmt.Sprintf("[blue]%d/%d[-]", totalProcessed, totalEntries)
-			}
-			percentage := float64(totalProcessed) / float64(totalEntries) * 100.0
-			if percentage >= 100.0 {
-				percentText = fmt.Sprintf("[green]%.1f%%[-]", percentage)
-			} else {
-				percentText = fmt.Sprintf("[blue]%.1f%%[-]", percentage)
-			}
-		} else {
-			processedText = fmt.Sprintf("%d", totalProcessed)
-			percentText = "-"
-		}
-
-		// Calculate speed (items/sec)
+		// Throttle updates to avoid flooding the channel
 		now := time.Now()
-		timeSinceLastUpdate := now.Sub(lastUpdateTime).Seconds()
-		if timeSinceLastUpdate > 0 && totalProcessed > lastCount {
-			currentSpeed := float64(totalProcessed-lastCount) / timeSinceLastUpdate
-			speedText = fmt.Sprintf("%.0f/s", currentSpeed)
-			lastUpdateTime = now
-			lastCount = totalProcessed
-		} else {
-			speedText = "-"
+		if now.Sub(lastUpdateTime) < 100*time.Millisecond && totalProcessed < totalEntries {
+			return
 		}
 
-		// Calculate average speed
-		if totalProcessed > 0 && elapsed.Seconds() > 0 {
-			avgSpeed := float64(totalProcessed) / elapsed.Seconds()
-			avgSpeedText = fmt.Sprintf("%.0f/s", avgSpeed)
+		elapsed := time.Since(startTime)
+		var percent float64
+		if totalEntries > 0 {
+			percent = float64(totalProcessed) / float64(totalEntries) * 100.0
+		}
 
-			// Calculate ETA
-			if totalEntries > 0 && totalProcessed < totalEntries {
-				remaining := totalEntries - totalProcessed
-				etaSeconds := float64(remaining) / avgSpeed
-				etaDuration := time.Duration(etaSeconds * float64(time.Second))
-				etaText = etaDuration.Round(time.Second).String()
-			} else {
-				etaText = "-"
+		// Calculate metrics
+		metrics := calculateProgressMetrics(totalProcessed, totalEntries, startTime, &lastUpdateTime, &lastCount)
+
+		if bh.RemoteCollectionUpdates != nil {
+			bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+				Step:      step,
+				Processed: totalProcessed,
+				Total:     totalEntries,
+				Percent:   percent,
+				Speed:     metrics.speedText,
+				AvgSpeed:  metrics.avgSpeedText,
+				ETA:       metrics.etaText,
+				Elapsed:   elapsed.Round(time.Second).String(),
 			}
-		} else {
-			avgSpeedText = "-"
-			etaText = "-"
 		}
-
-		bh.UIApp.UpdateRemoteCollectionRow(1, "", processedText, percentText, speedText, avgSpeedText, "-", etaText, elapsed.Round(time.Second).String())
 	}
 
 	// Second pass: process all readers sequentially
@@ -236,11 +213,6 @@ func (bh *BH) loadRemoteCollectionCache() {
 
 		bh.Log <- fmt.Sprintf("✅ %s loaded", filePath)
 	}
-}
-
-// updateRemoteRow is a helper to update remote collection row
-func (bh *BH) updateRemoteRow(row int, status, processed, percent, speed, avgSpeed, success, eta, elapsed string) {
-	bh.UIApp.UpdateRemoteCollectionRow(row, status, processed, percent, speed, avgSpeed, success, eta, elapsed)
 }
 
 // loadEnterpriseCATargets extracts enterprise CA targets from configuration
@@ -312,13 +284,8 @@ func (bh *BH) loadEnterpriseCATargets() []EnterpriseCACollectionTarget {
 }
 
 // collectEnterpriseCAData collects data from enterprise CAs
-func (bh *BH) collectEnterpriseCAData(spinner *ui.Spinner, targets []EnterpriseCACollectionTarget, collector *RemoteCollector) {
+func (bh *BH) collectEnterpriseCAData(step int, targets []EnterpriseCACollectionTarget, collector *RemoteCollector) {
 	bh.Log <- fmt.Sprintf("🎯 About to perform active collection for %d enterprise CAs", len(targets))
-
-	if spinner != nil {
-		spinner.SetRunningRow(2)
-	}
-	bh.updateRemoteRow(2, "", "0", "-", "-", "-", "0", "-", "-")
 
 	startTime := time.Now()
 	lastUpdateTime := startTime
@@ -328,11 +295,6 @@ func (bh *BH) collectEnterpriseCAData(spinner *ui.Spinner, targets []EnterpriseC
 
 	for idx, caTarget := range targets {
 		if bh.IsAborted() {
-			elapsed := time.Since(startTime)
-			if spinner != nil {
-				spinner.SetDone(2)
-			}
-			bh.updateRemoteRow(2, "[red]× Aborted", "", "", "-", "", "", "-", elapsed.Round(time.Second).String())
 			return
 		}
 
@@ -367,93 +329,45 @@ func (bh *BH) collectEnterpriseCAData(spinner *ui.Spinner, targets []EnterpriseC
 		processedCount := idx + 1
 		elapsed := time.Since(startTime)
 
-		var processedText string
-		var percentText string
-		var speedText string
-		var avgSpeedText string
-		var successText string
-		var etaText string
-
-		if processedCount == len(targets) {
-			processedText = fmt.Sprintf("[green]%d/%d[-]", processedCount, len(targets))
-		} else {
-			processedText = fmt.Sprintf("[blue]%d/%d[-]", processedCount, len(targets))
-		}
-		percentage := float64(processedCount) / float64(len(targets)) * 100.0
-		if percentage >= 100.0 {
-			percentText = fmt.Sprintf("[green]%.1f%%[-]", percentage)
-		} else {
-			percentText = fmt.Sprintf("[blue]%.1f%%[-]", percentage)
+		var percent float64
+		if len(targets) > 0 {
+			percent = float64(processedCount) / float64(len(targets)) * 100.0
 		}
 
-		// Calculate speed
-		now := time.Now()
-		timeSinceLastUpdate := now.Sub(lastUpdateTime).Seconds()
-		if timeSinceLastUpdate > 0 && processedCount > lastCount {
-			currentSpeed := float64(processedCount-lastCount) / timeSinceLastUpdate
-			speedText = fmt.Sprintf("%.1f/s", currentSpeed)
-			lastUpdateTime = now
-			lastCount = processedCount
-		} else {
-			speedText = "-"
+		// Calculate metrics
+		metrics := calculateProgressMetrics(processedCount, len(targets), startTime, &lastUpdateTime, &lastCount)
+
+		// Calculate success
+		var successPercent float64
+		if len(targets) > 0 {
+			successPercent = float64(successCount) / float64(len(targets)) * 100.0
 		}
+		successText := fmt.Sprintf("%d/%d (%.1f%%)", successCount, len(targets), successPercent)
 
-		// Calculate average speed
-		if processedCount > 0 && elapsed.Seconds() > 0 {
-			avgSpeed := float64(processedCount) / elapsed.Seconds()
-			avgSpeedText = fmt.Sprintf("%.1f/s", avgSpeed)
-
-			// Calculate ETA
-			if processedCount < len(targets) {
-				remaining := len(targets) - processedCount
-				etaSeconds := float64(remaining) / avgSpeed
-				etaDuration := time.Duration(etaSeconds * float64(time.Second))
-				etaText = etaDuration.Round(time.Second).String()
-			} else {
-				etaText = "-"
+		if bh.RemoteCollectionUpdates != nil {
+			bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+				Step:      step,
+				Processed: processedCount,
+				Total:     len(targets),
+				Percent:   percent,
+				Speed:     metrics.speedText,
+				AvgSpeed:  metrics.avgSpeedText,
+				Success:   successText,
+				ETA:       metrics.etaText,
+				Elapsed:   elapsed.Round(time.Second).String(),
 			}
-		} else {
-			avgSpeedText = "-"
-			etaText = "-"
 		}
-
-		successPercent := float64(successCount) / float64(len(targets)) * 100.0
-		successText = fmt.Sprintf("%d/%d (%.1f%%)", successCount, len(targets), successPercent)
-
-		bh.updateRemoteRow(2, "", processedText, percentText, speedText, avgSpeedText, successText, etaText, elapsed.Round(time.Second).String())
 	}
 
 	// Update final status
-	elapsed := time.Since(startTime)
-	if spinner != nil {
-		spinner.SetDone(2)
+	// Store results - convert to pointer map
+	if bh.RemoteEnterpriseCACollection == nil {
+		bh.RemoteEnterpriseCACollection = make(map[string]*EnterpriseCARemoteCollectionResult)
 	}
-
-	successPercent := 100.0
-	var processedText, percentText, successText, avgSpeedText string
-
-	if len(targets) > 0 {
-		successPercent = float64(successCount) / float64(len(targets)) * 100.0
-		processedText = fmt.Sprintf("[green]%d/%d[-]", len(targets), len(targets))
-		percentText = "[green]100.0%[-]"
-		successText = fmt.Sprintf("%d/%d (%.1f%%)", successCount, len(targets), successPercent)
-		avgSpeed := float64(len(targets)) / elapsed.Seconds()
-		avgSpeedText = fmt.Sprintf("%.1f/s", avgSpeed)
-	} else {
-		processedText = "-"
-		percentText = "-"
-		successText = "-"
-		avgSpeedText = "-"
+	for guid, result := range caResults {
+		resultCopy := result
+		bh.RemoteEnterpriseCACollection[guid] = &resultCopy
 	}
-
-	bh.updateRemoteRow(2, "[green]✓ Done",
-		processedText,
-		percentText,
-		"-",
-		avgSpeedText,
-		successText,
-		"-",
-		elapsed.Round(time.Second).String())
 
 	// Write CA results to file
 	if len(caResults) > 0 {
@@ -479,7 +393,7 @@ func (bh *BH) collectEnterpriseCAData(spinner *ui.Spinner, targets []EnterpriseC
 }
 
 // loadComputerTargets performs DNS lookups and returns viable computer targets
-func (bh *BH) loadComputerTargets(spinner *ui.Spinner) []CollectionTarget {
+func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 	var targets []CollectionTarget
 	computerPaths, err := bh.GetPaths("computers")
 	if err != nil {
@@ -507,11 +421,6 @@ func (bh *BH) loadComputerTargets(spinner *ui.Spinner) []CollectionTarget {
 
 		totalComputers += length
 	}
-
-	if spinner != nil {
-		spinner.SetRunningRow(3)
-	}
-	bh.updateRemoteRow(3, "", fmt.Sprintf("0/%d", totalComputers), "-", "-", "-", "-", "-", "0s")
 
 	startTime := time.Now()
 	lastUpdateTime := startTime
@@ -580,72 +489,27 @@ func (bh *BH) loadComputerTargets(spinner *ui.Spinner) []CollectionTarget {
 	go func() {
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
-		lastCountLocal := int32(0)
+		lastCountLocal := 0
 
 		for {
 			select {
 			case <-progressDone:
 				return
 			case <-ticker.C:
-				currentCount := entryCount.Load()
+				currentCount := int(entryCount.Load())
 				elapsed := time.Since(startTime)
 
-				var processedText string
-				var percentText string
-				var speedText string
-				var avgSpeedText string
-				var successText string
-				var etaText string
-
+				var percent float64
 				if totalComputers > 0 {
-					if int(currentCount) == totalComputers {
-						processedText = fmt.Sprintf("[green]%d/%d[-]", currentCount, totalComputers)
-					} else {
-						processedText = fmt.Sprintf("[blue]%d/%d[-]", currentCount, totalComputers)
-					}
-					percentage := float64(currentCount) / float64(totalComputers) * 100.0
-					if percentage >= 100.0 {
-						percentText = fmt.Sprintf("[green]%.1f%%[-]", percentage)
-					} else {
-						percentText = fmt.Sprintf("[blue]%.1f%%[-]", percentage)
-					}
-				} else {
-					processedText = strconv.Itoa(int(currentCount))
-					percentText = "-"
+					percent = float64(currentCount) / float64(totalComputers) * 100.0
 				}
 
-				// Calculate speed
-				now := time.Now()
-				timeSinceLastUpdate := now.Sub(lastUpdateTime).Seconds()
-				if timeSinceLastUpdate > 0 && currentCount > lastCountLocal {
-					currentSpeed := float64(currentCount-lastCountLocal) / timeSinceLastUpdate
-					speedText = fmt.Sprintf("%.1f/s", currentSpeed)
-					lastUpdateTime = now
-					lastCountLocal = currentCount
-				} else {
-					speedText = "-"
-				}
+				// Calculate metrics using helper
+				metrics := calculateProgressMetrics(currentCount, totalComputers, startTime, &lastUpdateTime, &lastCountLocal)
 
-				// Calculate average speed
-				if currentCount > 0 && elapsed.Seconds() > 0 {
-					avgSpeed := float64(currentCount) / elapsed.Seconds()
-					avgSpeedText = fmt.Sprintf("%.1f/s", avgSpeed)
-
-					// Calculate ETA
-					if totalComputers > 0 && int(currentCount) < totalComputers {
-						remaining := totalComputers - int(currentCount)
-						etaSeconds := float64(remaining) / avgSpeed
-						etaDuration := time.Duration(etaSeconds * float64(time.Second))
-						etaText = etaDuration.Round(time.Second).String()
-					} else {
-						etaText = "-"
-					}
-				} else {
-					avgSpeedText = "-"
-					etaText = "-"
-				}
-
-				currentSuccess := successCount.Load()
+				// Calculate success
+				currentSuccess := int(successCount.Load())
+				var successText string
 				if currentCount > 0 {
 					successPercent := float64(currentSuccess) / float64(currentCount) * 100.0
 					successText = fmt.Sprintf("%d/%d (%.1f%%)", currentSuccess, currentCount, successPercent)
@@ -653,7 +517,19 @@ func (bh *BH) loadComputerTargets(spinner *ui.Spinner) []CollectionTarget {
 					successText = "0/0"
 				}
 
-				bh.updateRemoteRow(3, "", processedText, percentText, speedText, avgSpeedText, successText, etaText, elapsed.Round(time.Second).String())
+				if bh.RemoteCollectionUpdates != nil {
+					bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+						Step:      step,
+						Processed: currentCount,
+						Total:     totalComputers,
+						Percent:   percent,
+						Speed:     metrics.speedText,
+						AvgSpeed:  metrics.avgSpeedText,
+						Success:   successText,
+						ETA:       metrics.etaText,
+						Elapsed:   elapsed.Round(time.Second).String(),
+					}
+				}
 			}
 		}
 	}()
@@ -705,47 +581,15 @@ func (bh *BH) loadComputerTargets(spinner *ui.Spinner) []CollectionTarget {
 	// Stop progress updater
 	close(progressDone)
 
-	elapsed := time.Since(startTime)
-
 	if bh.IsAborted() {
-		if spinner != nil {
-			spinner.SetDone(3)
-		}
-		bh.updateRemoteRow(3, "[red]× Aborted", "", "", "-", "", "", "-", elapsed.Round(time.Second).String())
 		return targets
 	}
-
-	finalEntryCount := entryCount.Load()
-	finalSuccessCount := successCount.Load()
-	avgRate := float64(finalEntryCount) / elapsed.Seconds()
-	successPercent := 100.0
-	if finalEntryCount > 0 {
-		successPercent = float64(finalSuccessCount) / float64(finalEntryCount) * 100.0
-	}
-
-	if spinner != nil {
-		spinner.SetDone(3)
-	}
-
-	bh.updateRemoteRow(3, "[green]✓ Done",
-		"",
-		"",
-		"-",
-		fmt.Sprintf("%.1f/s", avgRate),
-		fmt.Sprintf("%d/%d (%.1f%%)", finalSuccessCount, finalEntryCount, successPercent),
-		"-",
-		elapsed.Round(time.Second).String())
 
 	return targets
 }
 
 // collectComputerData collects data from computers using worker pool
-func (bh *BH) collectComputerData(spinner *ui.Spinner, computers []CollectionTarget, collector *RemoteCollector) {
-	if spinner != nil {
-		spinner.SetRunningRow(4)
-	}
-	bh.updateRemoteRow(4, "", "0", "-", "-", "-", "0", "-", "-")
-
+func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collector *RemoteCollector) {
 	numWorkers := bh.RemoteWorkers
 	timeout := bh.RemoteTimeout
 
@@ -811,7 +655,7 @@ func (bh *BH) collectComputerData(spinner *ui.Spinner, computers []CollectionTar
 	var finalAvgRate float64
 	var finalElapsed time.Duration
 
-	go bh.processComputerResults(resultChan, workersDone, encoder, &encoderMu, computers, &processedCount, &successCount, &finalAvgRate, &finalElapsed)
+	go bh.processComputerResults(step, resultChan, workersDone, encoder, &encoderMu, computers, &processedCount, &successCount, &finalAvgRate, &finalElapsed)
 
 	// Feed targets to workers
 	go func() {
@@ -839,10 +683,6 @@ func (bh *BH) collectComputerData(spinner *ui.Spinner, computers []CollectionTar
 
 	// Check if aborted before finalizing
 	if bh.IsAborted() {
-		if spinner != nil {
-			spinner.SetDone(4)
-		}
-		bh.updateRemoteRow(4, "[red]× Aborted", "", "", "-", "", "", "-", finalElapsed.Round(time.Second).String())
 		if fileInfo, err := os.Stat(remoteResultsFile); err == nil {
 			bh.Log <- fmt.Sprintf("✅ Computer results saved to: %s (%s)", remoteResultsFile, formatFileSize(fileInfo.Size()))
 		} else {
@@ -852,7 +692,7 @@ func (bh *BH) collectComputerData(spinner *ui.Spinner, computers []CollectionTar
 	}
 
 	// Update final status
-	bh.finalizeComputerCollection(spinner, len(computers), successCount, finalElapsed)
+	bh.finalizeComputerCollection(step, len(computers), successCount, finalElapsed)
 	if fileInfo, err := os.Stat(remoteResultsFile); err == nil {
 		bh.Log <- fmt.Sprintf("✅ Computer results saved to: %s (%s)", remoteResultsFile, formatFileSize(fileInfo.Size()))
 	} else {
@@ -890,7 +730,7 @@ func (bh *BH) checkAnyRpcSuccess(result RemoteCollectionResult) bool {
 }
 
 // processComputerResults handles result processing from collection workers
-func (bh *BH) processComputerResults(resultChan chan struct {
+func (bh *BH) processComputerResults(step int, resultChan chan struct {
 	sid    string
 	result RemoteCollectionResult
 }, done chan struct{}, encoder *msgpack.Encoder, encoderMu *sync.Mutex,
@@ -947,26 +787,20 @@ func (bh *BH) processComputerResults(resultChan chan struct {
 			progressPercent := float64(*processedCount) / float64(len(computers)) * 100.0
 			successPercent := float64(*successCount) / float64(len(computers)) * 100.0
 
-			var processedText, percentText string
-			if *processedCount == len(computers) {
-				processedText = fmt.Sprintf("[green]%d/%d[-]", *processedCount, len(computers))
-			} else {
-				processedText = fmt.Sprintf("[blue]%d/%d[-]", *processedCount, len(computers))
+			// Send channel update
+			if bh.RemoteCollectionUpdates != nil {
+				bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+					Step:      step,
+					Processed: *processedCount,
+					Total:     len(computers),
+					Percent:   progressPercent,
+					Speed:     fmt.Sprintf("%.1f/s", instRate),
+					AvgSpeed:  fmt.Sprintf("%.1f/s", avgRate),
+					Success:   fmt.Sprintf("%d/%d (%.1f%%)", *successCount, len(computers), successPercent),
+					ETA:       eta.Round(time.Second).String(),
+					Elapsed:   elapsed.Round(time.Second).String(),
+				}
 			}
-			if progressPercent >= 100.0 {
-				percentText = fmt.Sprintf("[green]%.1f%%[-]", progressPercent)
-			} else {
-				percentText = fmt.Sprintf("[blue]%.1f%%[-]", progressPercent)
-			}
-
-			bh.updateRemoteRow(4, "",
-				processedText,
-				percentText,
-				fmt.Sprintf("%.1f/s", instRate),
-				fmt.Sprintf("%.1f/s", avgRate),
-				fmt.Sprintf("%d/%d (%.1f%%)", *successCount, len(computers), successPercent),
-				eta.Round(time.Second).String(),
-				elapsed.Round(time.Second).String())
 		}
 	}
 
@@ -986,31 +820,6 @@ func (bh *BH) processComputerResults(resultChan chan struct {
 }
 
 // finalizeComputerCollection finalizes computer collection statistics
-func (bh *BH) finalizeComputerCollection(spinner *ui.Spinner, total, success int, elapsed time.Duration) {
-	if spinner != nil {
-		spinner.SetDone(4)
-	}
-
-	successPercent := 0.0
-	var processedText, percentText, successText string
-
-	if total > 0 {
-		successPercent = float64(success) / float64(total) * 100.0
-		processedText = fmt.Sprintf("[green]%d/%d[-]", total, total)
-		percentText = "[green]100.0%[-]"
-		successText = fmt.Sprintf("%d/%d (%.1f%%)", success, total, successPercent)
-	} else {
-		processedText = "-"
-		percentText = "-"
-		successText = "-"
-	}
-
-	bh.updateRemoteRow(4, "[green]✓ Done",
-		processedText,
-		percentText,
-		"-",
-		"",
-		successText,
-		"-",
-		elapsed.Round(time.Second).String())
+func (bh *BH) finalizeComputerCollection(step, total, success int, elapsed time.Duration) {
+	// Final update sent via runRemoteStep
 }
