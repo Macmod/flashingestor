@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Macmod/flashingestor/config"
+	"github.com/Macmod/flashingestor/core"
 	"github.com/Macmod/flashingestor/ui"
 )
 
@@ -89,6 +90,7 @@ type BH struct {
 	RemoteWriteBuff              int
 	RemoteComputerCollection     map[string]*RemoteCollectionResult
 	RemoteEnterpriseCACollection map[string]*EnterpriseCARemoteCollectionResult
+	ConversionUpdates            chan<- core.ConversionUpdate
 	abortFlag                    atomic.Bool
 	generatedFiles               []string
 	writers                      map[string]*BHFormatWriter // Indexed by "timestamp_kind"

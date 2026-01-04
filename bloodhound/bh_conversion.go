@@ -1,7 +1,9 @@
 package bloodhound
 
 import (
+	"archive/zip"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,112 +14,61 @@ import (
 	"time"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
+	"github.com/Macmod/flashingestor/core"
 	gildap "github.com/Macmod/flashingestor/ldap"
 	"github.com/Macmod/flashingestor/reader"
-	"github.com/Macmod/flashingestor/ui"
 	"github.com/go-ldap/ldap/v3"
 	"github.com/vmihailenco/msgpack"
 )
 
-// ConversionProgressTracker manages real-time progress updates during conversion.
-type ConversionProgressTracker struct {
-	startTime      time.Time
-	lastUpdateTime time.Time
-	lastCount      int
-	row            int
-	uiApp          *ui.Application
-	isAborted      func() bool
-	stopped        bool
+type ConversionUpdate = core.ConversionUpdate
+
+// progressMetrics holds calculated progress metrics
+type progressMetrics struct {
+	speedText    string
+	avgSpeedText string
+	etaText      string
 }
 
-func newConversionProgressTracker(row int, uiApp *ui.Application, isAborted func() bool) *ConversionProgressTracker {
+// calculateProgressMetrics computes speed, average speed, and ETA for progress updates
+func calculateProgressMetrics(currentCount, totalCount int, startTime time.Time, lastUpdateTime *time.Time, lastCount *int) progressMetrics {
+	// Calculate current speed
+	var speedText string
 	now := time.Now()
-	return &ConversionProgressTracker{
-		startTime:      now,
-		lastUpdateTime: now,
-		lastCount:      0,
-		row:            row,
-		uiApp:          uiApp,
-		isAborted:      isAborted,
+	timeSinceLastUpdate := now.Sub(*lastUpdateTime).Seconds()
+	if timeSinceLastUpdate > 0 && currentCount > *lastCount {
+		currentSpeed := float64(currentCount-*lastCount) / timeSinceLastUpdate
+		speedText = fmt.Sprintf("%.0f/s", currentSpeed)
+		*lastUpdateTime = now
+		*lastCount = currentCount
+	} else {
+		speedText = "-"
 	}
-}
 
-// createProgressCallback creates a progress callback function for UI updates
-func (t *ConversionProgressTracker) createProgressCallback() func(int, int) {
-	return func(count, total int) {
-		if t.stopped || t.isAborted() || t.uiApp == nil {
-			return
-		}
-
-		elapsed := time.Since(t.startTime)
-		progressText := t.formatProgress(count, total)
-		percentText := t.formatPercentage(count, total)
-		speedText := t.calculateCurrentSpeed(count)
-		avgSpeedText, etaText := t.calculateAvgSpeedAndETA(count, total, elapsed)
-
-		t.uiApp.UpdateConversionRow(t.row, "", progressText, percentText, speedText, avgSpeedText, etaText, elapsed.Round(time.Second).String())
-	}
-}
-
-// formatProgress formats the progress text with color coding
-func (t *ConversionProgressTracker) formatProgress(count, total int) string {
-	if total > 0 {
-		if count == total {
-			return fmt.Sprintf("[green]%d/%d[-]", count, total)
-		}
-		return fmt.Sprintf("[blue]%d/%d[-]", count, total)
-	}
-	return strconv.Itoa(count)
-}
-
-// formatPercentage formats the percentage text with color coding
-func (t *ConversionProgressTracker) formatPercentage(count, total int) string {
-	if total > 0 {
-		percentage := float64(count) / float64(total) * 100.0
-		if percentage >= 100.0 {
-			return fmt.Sprintf("[green]%.1f%%[-]", percentage)
-		}
-		return fmt.Sprintf("[blue]%.1f%%[-]", percentage)
-	}
-	return "-"
-}
-
-// calculateCurrentSpeed calculates the current processing speed
-func (t *ConversionProgressTracker) calculateCurrentSpeed(count int) string {
-	now := time.Now()
-	timeSinceLastUpdate := now.Sub(t.lastUpdateTime).Seconds()
-	if timeSinceLastUpdate > 0 && count > t.lastCount {
-		currentSpeed := float64(count-t.lastCount) / timeSinceLastUpdate
-		t.lastUpdateTime = now
-		t.lastCount = count
-		return fmt.Sprintf("%.0f/s", currentSpeed)
-	}
-	return "-"
-}
-
-// calculateAvgSpeedAndETA calculates average speed and estimated time of arrival
-func (t *ConversionProgressTracker) calculateAvgSpeedAndETA(count, total int, elapsed time.Duration) (string, string) {
-	if count > 0 && elapsed.Seconds() > 0 {
-		avgSpeed := float64(count) / elapsed.Seconds()
-		avgSpeedText := fmt.Sprintf("%.0f/s", avgSpeed)
-
-		var etaText string
-		if total > 0 && count < total {
-			remaining := total - count
+	// Calculate average speed and ETA
+	var avgSpeedText, etaText string
+	elapsed := time.Since(startTime)
+	if currentCount > 0 && elapsed.Seconds() > 0 {
+		avgSpeed := float64(currentCount) / elapsed.Seconds()
+		avgSpeedText = fmt.Sprintf("%.0f/s", avgSpeed)
+		if totalCount > 0 && currentCount < totalCount {
+			remaining := totalCount - currentCount
 			etaSeconds := float64(remaining) / avgSpeed
 			etaDuration := time.Duration(etaSeconds * float64(time.Second))
 			etaText = etaDuration.Round(time.Second).String()
 		} else {
 			etaText = "-"
 		}
-		return avgSpeedText, etaText
+	} else {
+		avgSpeedText = "-"
+		etaText = "-"
 	}
-	return "-", "-"
-}
 
-// stop prevents any further progress updates from this tracker
-func (t *ConversionProgressTracker) stop() {
-	t.stopped = true
+	return progressMetrics{
+		speedText:    speedText,
+		avgSpeedText: avgSpeedText,
+		etaText:      etaText,
+	}
 }
 
 func (bh *BH) loadRemoteComputerResults() map[string]*RemoteCollectionResult {
@@ -168,7 +119,7 @@ func (bh *BH) loadRemoteCAResults() map[string]*EnterpriseCARemoteCollectionResu
 	return results
 }
 
-func (bh *BH) ProcessObjects(fileNames []string, kind string, progressCallback func(count, total int)) int {
+func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 	writer, err := bh.GetCurrentWriter(kind)
 	if err != nil {
 		bh.Log <- "❌ Error getting writer for kind " + kind + ": " + err.Error()
@@ -195,6 +146,10 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, progressCallback f
 	totalInFiles := 0
 	const progressInterval = 10
 
+	startTime := time.Now()
+	lastUpdateTime := startTime
+	lastCount := 0
+
 	readers := make([]*reader.MPReader, 0, len(fileNames))
 	for _, fileName := range fileNames {
 		reader, err := reader.NewMPReader(fileName)
@@ -211,7 +166,14 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, progressCallback f
 		}
 	}
 
-	progressCallback(0, totalInFiles)
+	if bh.ConversionUpdates != nil {
+		bh.ConversionUpdates <- ConversionUpdate{
+			Step:      step,
+			Processed: 0,
+			Total:     totalInFiles,
+			Percent:   0.0,
+		}
+	}
 
 	var wrappedEntry gildap.LDAPEntry
 	originalEntry := new(ldap.Entry)
@@ -274,8 +236,21 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, progressCallback f
 				batchCount++
 
 				if batchCount >= progressInterval {
-					if progressCallback != nil {
-						progressCallback(totalCount, totalInFiles)
+					if bh.ConversionUpdates != nil {
+						elapsed := time.Since(startTime)
+						percentage := float64(totalCount) / float64(totalInFiles) * 100.0
+						metrics := calculateProgressMetrics(totalCount, totalInFiles, startTime, &lastUpdateTime, &lastCount)
+
+						bh.ConversionUpdates <- ConversionUpdate{
+							Step:      step,
+							Processed: totalCount,
+							Total:     totalInFiles,
+							Percent:   percentage,
+							Speed:     metrics.speedText,
+							AvgSpeed:  metrics.avgSpeedText,
+							ETA:       metrics.etaText,
+							Elapsed:   elapsed.Round(time.Second).String(),
+						}
 					}
 					batchCount = 0
 				}
@@ -304,8 +279,13 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, progressCallback f
 		return totalCount
 	}
 
-	if progressCallback != nil {
-		progressCallback(totalCount, totalInFiles)
+	if bh.ConversionUpdates != nil {
+		bh.ConversionUpdates <- ConversionUpdate{
+			Step:      step,
+			Processed: totalCount,
+			Total:     totalInFiles,
+			Percent:   100.0,
+		}
 	}
 
 	return totalCount
@@ -354,7 +334,7 @@ func (bh *BH) addWellKnownObjects(writer *BHFormatWriter, kind string, domainNam
 }
 
 // ProcessDomain reads domain entries and creates a domain JSON file
-func (bh *BH) ProcessDomain(progressCallback func(count, total int)) {
+func (bh *BH) ProcessDomain(step int) {
 	if bh.IsAborted() {
 		return
 	}
@@ -381,6 +361,10 @@ func (bh *BH) ProcessDomain(progressCallback func(count, total int)) {
 
 	// Calculate total entries across all domain directories
 	totalInFiles := 0
+	startTime := time.Now()
+	lastUpdateTime := startTime
+	lastCount := 0
+
 	type domainReaderInfo struct {
 		domainName string
 		reader     *reader.MPReader
@@ -389,7 +373,7 @@ func (bh *BH) ProcessDomain(progressCallback func(count, total int)) {
 	domainReaders := make([]domainReaderInfo, 0)
 
 	for _, domainEntry := range domainEntries {
-		if !domainEntry.IsDir() {
+		if !domainEntry.IsDir() || strings.HasPrefix(domainEntry.Name(), "FOREST+") {
 			continue
 		}
 
@@ -423,8 +407,13 @@ func (bh *BH) ProcessDomain(progressCallback func(count, total int)) {
 	originalEntry := new(ldap.Entry)
 	var entry gildap.LDAPEntry
 
-	if progressCallback != nil {
-		progressCallback(0, totalInFiles)
+	if bh.ConversionUpdates != nil {
+		bh.ConversionUpdates <- ConversionUpdate{
+			Step:      step,
+			Processed: 0,
+			Total:     totalInFiles,
+			Percent:   0.0,
+		}
 	}
 
 	for _, info := range domainReaders {
@@ -445,8 +434,21 @@ func (bh *BH) ProcessDomain(progressCallback func(count, total int)) {
 			domainWriter.Add(domain)
 
 			processedCount++
-			if progressCallback != nil {
-				progressCallback(processedCount, totalInFiles)
+			if bh.ConversionUpdates != nil {
+				elapsed := time.Since(startTime)
+				percentage := float64(processedCount) / float64(totalInFiles) * 100.0
+				metrics := calculateProgressMetrics(processedCount, totalInFiles, startTime, &lastUpdateTime, &lastCount)
+
+				bh.ConversionUpdates <- ConversionUpdate{
+					Step:      step,
+					Processed: processedCount,
+					Total:     totalInFiles,
+					Percent:   percentage,
+					Speed:     metrics.speedText,
+					AvgSpeed:  metrics.avgSpeedText,
+					ETA:       metrics.etaText,
+					Elapsed:   elapsed.Round(time.Second).String(),
+				}
 			}
 		}
 
@@ -495,7 +497,7 @@ func (bh *BH) loadTrusts(trustsPath string) []gildap.LDAPEntry {
 }
 
 // ProcessConfiguration processes configuration entries for PKI objects
-func (bh *BH) ProcessConfiguration(progressCallback func(count, total int)) {
+func (bh *BH) ProcessConfiguration(step int) {
 	if bh.IsAborted() {
 		return
 	}
@@ -574,6 +576,10 @@ func (bh *BH) ProcessConfiguration(progressCallback func(count, total int)) {
 
 	// Calculate total entries across all files
 	totalInFiles := 0
+	startTime := time.Now()
+	lastUpdateTime := startTime
+	lastCount := 0
+
 	readers := make([]*reader.MPReader, 0, len(configPaths))
 	for _, configPath := range configPaths {
 		mpReader, err := reader.NewMPReader(configPath)
@@ -599,8 +605,13 @@ func (bh *BH) ProcessConfiguration(progressCallback func(count, total int)) {
 	originalEntry := new(ldap.Entry)
 	var entry gildap.LDAPEntry
 
-	if progressCallback != nil {
-		progressCallback(0, totalInFiles)
+	if bh.ConversionUpdates != nil {
+		bh.ConversionUpdates <- ConversionUpdate{
+			Step:      step,
+			Processed: 0,
+			Total:     totalInFiles,
+			Percent:   0.0,
+		}
 	}
 
 	for _, mpReader := range readers {
@@ -623,8 +634,21 @@ func (bh *BH) ProcessConfiguration(progressCallback func(count, total int)) {
 			batchCount++
 
 			if batchCount >= progressInterval {
-				if progressCallback != nil {
-					progressCallback(processedCount, totalInFiles)
+				if bh.ConversionUpdates != nil {
+					elapsed := time.Since(startTime)
+					percentage := float64(processedCount) / float64(totalInFiles) * 100.0
+					metrics := calculateProgressMetrics(processedCount, totalInFiles, startTime, &lastUpdateTime, &lastCount)
+
+					bh.ConversionUpdates <- ConversionUpdate{
+						Step:      step,
+						Processed: processedCount,
+						Total:     totalInFiles,
+						Percent:   percentage,
+						Speed:     metrics.speedText,
+						AvgSpeed:  metrics.avgSpeedText,
+						ETA:       metrics.etaText,
+						Elapsed:   elapsed.Round(time.Second).String(),
+					}
 				}
 				batchCount = 0
 			}
@@ -635,8 +659,13 @@ func (bh *BH) ProcessConfiguration(progressCallback func(count, total int)) {
 		}
 	}
 
-	if progressCallback != nil {
-		progressCallback(processedCount, totalInFiles)
+	if bh.ConversionUpdates != nil {
+		bh.ConversionUpdates <- ConversionUpdate{
+			Step:      step,
+			Processed: processedCount,
+			Total:     totalInFiles,
+			Percent:   100.0,
+		}
 	}
 }
 
@@ -729,7 +758,7 @@ func (bh *BH) processCertificationAuthority(entry *gildap.LDAPEntry) {
 }
 
 // LoadSchemaInfo loads schema information from the schema file
-func (bh *BH) LoadSchemaInfo(progressCallback func(count, total int)) {
+func (bh *BH) LoadSchemaInfo(step int) {
 	if bh.IsAborted() {
 		return
 	}
@@ -738,6 +767,10 @@ func (bh *BH) LoadSchemaInfo(progressCallback func(count, total int)) {
 
 	// Calculate total entries across all files
 	totalInFiles := 0
+	startTime := time.Now()
+	lastUpdateTime := startTime
+	lastCount := 0
+
 	readers := make([]*reader.MPReader, 0, len(schemaPaths))
 	for _, schemaPath := range schemaPaths {
 		mpReader, err := reader.NewMPReader(schemaPath)
@@ -760,8 +793,13 @@ func (bh *BH) LoadSchemaInfo(progressCallback func(count, total int)) {
 	originalEntry := new(ldap.Entry)
 	var entry gildap.LDAPEntry
 
-	if progressCallback != nil {
-		progressCallback(0, totalInFiles)
+	if bh.ConversionUpdates != nil {
+		bh.ConversionUpdates <- ConversionUpdate{
+			Step:      step,
+			Processed: 0,
+			Total:     totalInFiles,
+			Percent:   0.0,
+		}
 	}
 
 	for _, mpReader := range readers {
@@ -782,12 +820,31 @@ func (bh *BH) LoadSchemaInfo(progressCallback func(count, total int)) {
 			schemaIDGUID := entry.GetAttrRawVal("schemaIDGUID", []byte{})
 			guidStr := gildap.BytesToGUID(schemaIDGUID)
 
-			builder.BState().ObjectTypeGUIDMap.Store(strings.ToLower(name), guidStr)
+			domainName := entry.GetDomainFromDN()
+			forestName := builder.BState().GetForestRoot(domainName)
+
+			builder.BState().AttrGUIDMap.Store(
+				forestName+"+"+strings.ToLower(name),
+				guidStr,
+			)
 
 			processedCount++
 
-			if progressCallback != nil {
-				progressCallback(processedCount, totalInFiles)
+			if bh.ConversionUpdates != nil {
+				elapsed := time.Since(startTime)
+				percentage := float64(processedCount) / float64(totalInFiles) * 100.0
+				metrics := calculateProgressMetrics(processedCount, totalInFiles, startTime, &lastUpdateTime, &lastCount)
+
+				bh.ConversionUpdates <- ConversionUpdate{
+					Step:      step,
+					Processed: processedCount,
+					Total:     totalInFiles,
+					Percent:   percentage,
+					Speed:     metrics.speedText,
+					AvgSpeed:  metrics.avgSpeedText,
+					ETA:       metrics.etaText,
+					Elapsed:   elapsed.Round(time.Second).String(),
+				}
 			}
 		}
 	}
@@ -805,13 +862,6 @@ func (bh *BH) PerformConversion() {
 	bh.Timestamp = time.Now().Format("20060102150405")
 	bh.generatedFiles = make([]string, 0)
 
-	bh.UIApp.SetupConversionTable()
-
-	var spinner *ui.Spinner
-	spinner = ui.NewSingleTableSpinner(bh.UIApp, bh.UIApp.GetConversionTable(), 0)
-	spinner.Start()
-	defer spinner.Stop()
-
 	abortLogged := false
 	notifyAbort := func() bool {
 		if bh.IsAborted() {
@@ -828,8 +878,9 @@ func (bh *BH) PerformConversion() {
 		return
 	}
 
-	// Initialize builder state if needed
-	builder.BState().Init()
+	// Initialize builder state
+	forestMapPath := filepath.Join(bh.LdapFolder, "ForestDomains.json")
+	builder.BState().Init(forestMapPath)
 
 	if notifyAbort() {
 		return
@@ -840,66 +891,66 @@ func (bh *BH) PerformConversion() {
 	bh.RemoteEnterpriseCACollection = bh.loadRemoteCAResults()
 
 	// Load cache and schema (rows 1-2)
-	bh.runConversionStep(spinner, 1, func() { bh.loadConversionCache() })
+	bh.runConversionStep(1, func() { bh.loadConversionCache(1) })
 	if notifyAbort() {
 		return
 	}
-	bh.runSchemaConversion(spinner, 2)
+	bh.runConversionStep(2, func() { bh.LoadSchemaInfo(2) })
 	if notifyAbort() {
 		return
 	}
 
 	// Process domains and configuration (rows 3-4)
-	bh.runDomainConversion(spinner, 3)
+	bh.runConversionStep(3, func() { bh.ProcessDomain(3) })
 	if notifyAbort() {
 		return
 	}
 
-	bh.runConfigurationConversion(spinner, 4)
+	bh.runConversionStep(4, func() { bh.ProcessConfiguration(4) })
 	if notifyAbort() {
 		return
 	}
 
 	// Process all object types (rows 5-10)
 	gposPaths, _ := bh.GetPaths("gpos")
-	bh.runObjectConversion(spinner, 5, gposPaths, "gpos")
+	bh.runConversionStep(5, func() { bh.ProcessObjects(gposPaths, "gpos", 5) })
 	if notifyAbort() {
 		return
 	}
 
 	ousPaths, _ := bh.GetPaths("ous")
-	bh.runObjectConversion(spinner, 6, ousPaths, "ous")
+	bh.runConversionStep(6, func() { bh.ProcessObjects(ousPaths, "ous", 6) })
 	if notifyAbort() {
 		return
 	}
 
 	containersPaths, _ := bh.GetPaths("containers")
-	bh.runObjectConversion(spinner, 7, containersPaths, "containers")
+	bh.runConversionStep(7, func() { bh.ProcessObjects(containersPaths, "containers", 7) })
 	if notifyAbort() {
 		return
 	}
 
 	groupsPaths, _ := bh.GetPaths("groups")
-	bh.runObjectConversion(spinner, 8, groupsPaths, "groups")
+	bh.runConversionStep(8, func() { bh.ProcessObjects(groupsPaths, "groups", 8) })
 	if notifyAbort() {
 		return
 	}
 
 	computersPaths, _ := bh.GetPaths("computers")
-	bh.runObjectConversion(spinner, 9, computersPaths, "computers")
+	bh.runConversionStep(9, func() { bh.ProcessObjects(computersPaths, "computers", 9) })
 	if notifyAbort() {
 		return
 	}
 
 	usersPaths, _ := bh.GetPaths("users")
-	bh.runObjectConversion(spinner, 10, usersPaths, "users")
+	bh.runConversionStep(10, func() { bh.ProcessObjects(usersPaths, "users", 10) })
 	if notifyAbort() {
 		return
 	}
 
 	// Compress output if enabled (row 11)
 	if bh.RuntimeOptions.GetCompressOutput() {
-		bh.runConversionStep(spinner, 11, func() { bh.compressBloodhoundOutput() })
+		bh.runConversionStep(11, func() { bh.compressBloodhoundOutput(11) })
 	}
 
 	if builder.BState().EmptySDCount > 0 {
@@ -907,72 +958,45 @@ func (bh *BH) PerformConversion() {
 	}
 }
 
-// runConversionStep runs a conversion step and updates UI
-func (bh *BH) runConversionStep(spinner *ui.Spinner, row int, stepFunc func()) {
+// runConversionStep runs a conversion step and sends progress events
+func (bh *BH) runConversionStep(row int, stepFunc func()) {
 	if bh.IsAborted() {
 		return
 	}
 
-	if spinner != nil {
-		spinner.SetRunningRow(row)
+	if bh.ConversionUpdates != nil {
+		bh.ConversionUpdates <- ConversionUpdate{
+			Step:   row,
+			Status: "running",
+		}
 	}
-	bh.UIApp.UpdateConversionRow(row, "", "-", "-", "-", "-", "-", "-")
 
 	startTime := time.Now()
 	stepFunc()
 	elapsed := time.Since(startTime)
 
 	if bh.IsAborted() {
-		if spinner != nil {
-			spinner.SetDone(row)
+		if bh.ConversionUpdates != nil {
+			bh.ConversionUpdates <- ConversionUpdate{
+				Step:    row,
+				Status:  "aborted",
+				Elapsed: elapsed.Round(time.Second).String(),
+			}
 		}
-		bh.UIApp.UpdateConversionRow(row, "[red]× Aborted", "-", "-", "-", "-", "-", elapsed.Round(time.Second).String())
 		return
 	}
 
-	if spinner != nil {
-		spinner.SetDone(row)
-	}
-	bh.UIApp.UpdateConversionRow(row, "[green]✓ Done", "", "", "-", "", "-", elapsed.Round(time.Second).String())
-}
-
-// runConversionWithProgress runs a conversion step with progress tracking
-func (bh *BH) runConversionWithProgress(spinner *ui.Spinner, row int, workFunc func(progressCallback func(int, int))) {
-	if bh.IsAborted() {
-		return
-	}
-
-	if spinner != nil {
-		spinner.SetRunningRow(row)
-	}
-	bh.UIApp.UpdateConversionRow(row, "", "0", "-", "-", "-", "-", "-")
-
-	tracker := newConversionProgressTracker(row, bh.UIApp, bh.IsAborted)
-	progressCallback := tracker.createProgressCallback()
-
-	startTime := time.Now()
-	workFunc(progressCallback)
-	elapsed := time.Since(startTime)
-
-	// Stop tracker to prevent any further progress updates
-	tracker.stop()
-
-	if bh.IsAborted() {
-		if spinner != nil {
-			spinner.SetDone(row)
+	if bh.ConversionUpdates != nil {
+		bh.ConversionUpdates <- ConversionUpdate{
+			Step:    row,
+			Status:  "done",
+			Elapsed: elapsed.Round(time.Second).String(),
 		}
-		bh.UIApp.UpdateConversionRow(row, "[red]× Aborted", "-", "-", "-", "-", "-", elapsed.Round(time.Second).String())
-		return
 	}
-
-	if spinner != nil {
-		spinner.SetDone(row)
-	}
-	bh.UIApp.UpdateConversionRow(row, "[green]✓ Done", "", "", "-", "", "-", elapsed.Round(time.Second).String())
 }
 
 // loadConversionCache loads all necessary caches for conversion
-func (bh *BH) loadConversionCache() {
+func (bh *BH) loadConversionCache(step int) {
 	if bh.IsAborted() {
 		return
 	}
@@ -1036,28 +1060,9 @@ func (bh *BH) loadConversionCache() {
 		totalProcessed++
 
 		elapsed := time.Since(startTime)
-		var progressText string
-		var percentText string
 		var speedText string
 		var avgSpeedText string
 		var etaText string
-
-		if totalEntries > 0 {
-			if totalProcessed >= totalEntries {
-				progressText = fmt.Sprintf("[green]%d/%d[-]", totalProcessed, totalEntries)
-			} else {
-				progressText = fmt.Sprintf("[blue]%d/%d[-]", totalProcessed, totalEntries)
-			}
-			percentage := float64(totalProcessed) / float64(totalEntries) * 100.0
-			if percentage >= 100.0 {
-				percentText = fmt.Sprintf("[green]%.1f%%[-]", percentage)
-			} else {
-				percentText = fmt.Sprintf("[blue]%.1f%%[-]", percentage)
-			}
-		} else {
-			progressText = strconv.Itoa(totalProcessed)
-			percentText = "-"
-		}
 
 		// Calculate speed (items/sec)
 		now := time.Now()
@@ -1090,7 +1095,23 @@ func (bh *BH) loadConversionCache() {
 			etaText = "-"
 		}
 
-		bh.UIApp.UpdateConversionRow(1, "", progressText, percentText, speedText, avgSpeedText, etaText, elapsed.Round(time.Second).String())
+		if bh.ConversionUpdates != nil {
+			percentage := 0.0
+			if totalEntries > 0 {
+				percentage = float64(totalProcessed) / float64(totalEntries) * 100.0
+			}
+
+			bh.ConversionUpdates <- ConversionUpdate{
+				Step:      step,
+				Processed: totalProcessed,
+				Total:     totalEntries,
+				Percent:   percentage,
+				Speed:     speedText,
+				AvgSpeed:  avgSpeedText,
+				ETA:       etaText,
+				Elapsed:   elapsed.Round(time.Second).String(),
+			}
+		}
 	}
 
 	// Second pass: process all readers sequentially
@@ -1111,30 +1132,124 @@ func (bh *BH) loadConversionCache() {
 	}
 }
 
-// runSchemaConversion loads schema with progress tracking
-func (bh *BH) runSchemaConversion(spinner *ui.Spinner, row int) {
-	bh.runConversionWithProgress(spinner, row, func(progressCallback func(int, int)) {
-		bh.LoadSchemaInfo(progressCallback)
-	})
+// compressBloodhoundOutput packages all generated BloodHound JSON files into a timestamped zip archive
+func (bh *BH) compressBloodhoundOutput(step int) {
+	if bh.IsAborted() {
+		return
+	}
+
+	// Filter to only include files that were successfully generated and exist
+	var filesToCompress []string
+	for _, file := range bh.generatedFiles {
+		if _, err := os.Stat(file); err == nil {
+			filesToCompress = append(filesToCompress, file)
+		}
+	}
+
+	if len(filesToCompress) == 0 {
+		bh.Log <- "[yellow]🫠 No JSON files found to compress[-]"
+		return
+	}
+
+	// Create zip file using the current timestamp
+	zipPath := filepath.Join(bh.OutputFolder, bh.Timestamp+"_BloodHound.zip")
+	zipFile, err := os.Create(zipPath)
+	if err != nil {
+		bh.Log <- "❌ Error creating zip file: " + err.Error()
+		return
+	}
+	defer zipFile.Close()
+
+	zipWriter := zip.NewWriter(zipFile)
+	defer zipWriter.Close()
+
+	// Initialize progress tracking
+	startTime := time.Now()
+	lastUpdateTime := startTime
+	var lastCount int
+	totalFiles := len(filesToCompress)
+
+	// Send initial update
+	if bh.ConversionUpdates != nil {
+		bh.ConversionUpdates <- ConversionUpdate{
+			Step:      step,
+			Processed: 0,
+			Total:     totalFiles,
+			Percent:   0.0,
+		}
+	}
+
+	// Add each JSON file to the zip
+	for i, file := range filesToCompress {
+		if bh.IsAborted() {
+			return
+		}
+
+		if err := bh.addFileToZip(zipWriter, file); err != nil {
+			bh.Log <- "❌ Error adding file to zip: " + err.Error()
+			return
+		}
+
+		// Update progress
+		count := i + 1
+		if bh.ConversionUpdates != nil {
+			elapsed := time.Since(startTime)
+			percentage := float64(count) / float64(totalFiles) * 100.0
+			metrics := calculateProgressMetrics(count, totalFiles, startTime, &lastUpdateTime, &lastCount)
+
+			bh.ConversionUpdates <- ConversionUpdate{
+				Step:      step,
+				Processed: count,
+				Total:     totalFiles,
+				Percent:   percentage,
+				Speed:     metrics.speedText,
+				AvgSpeed:  metrics.avgSpeedText,
+				ETA:       metrics.etaText,
+				Elapsed:   elapsed.Round(time.Second).String(),
+			}
+		}
+	}
+
+	// Close the zip writer before getting file size
+	if err := zipWriter.Close(); err != nil {
+		bh.Log <- "❌ Error finalizing zip: " + err.Error()
+		return
+	}
+
+	// Get zip file size
+	if fileInfo, err := os.Stat(zipPath); err == nil {
+		bh.Log <- fmt.Sprintf("✅ [green]BloodHound dump: \"%s\" (%s)[-]", zipPath, formatFileSize(fileInfo.Size()))
+	} else {
+		bh.Log <- fmt.Sprintf("🫠 [yellow]Problem saving \"%s\": %v[-]", zipPath, err)
+	}
+
+	// Cleanup original files if enabled
+	if bh.RuntimeOptions.GetCleanupAfterCompression() {
+		for _, file := range filesToCompress {
+			if err := os.Remove(file); err != nil {
+				bh.Log <- "[yellow]🫠 Could not remove \"" + filepath.Base(file) + "\":[-] " + err.Error()
+			}
+		}
+		bh.Log <- fmt.Sprintf("🧹 Cleaned up %d original JSON files from \"%s\"", len(filesToCompress), bh.OutputFolder)
+	}
 }
 
-// runDomainConversion processes domains with progress tracking
-func (bh *BH) runDomainConversion(spinner *ui.Spinner, row int) {
-	bh.runConversionWithProgress(spinner, row, func(progressCallback func(int, int)) {
-		bh.ProcessDomain(progressCallback)
-	})
-}
+// addFileToZip adds a single file to the zip archive
+func (bh *BH) addFileToZip(zipWriter *zip.Writer, filePath string) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
 
-// runConfigurationConversion processes configuration with progress tracking
-func (bh *BH) runConfigurationConversion(spinner *ui.Spinner, row int) {
-	bh.runConversionWithProgress(spinner, row, func(progressCallback func(int, int)) {
-		bh.ProcessConfiguration(progressCallback)
-	})
-}
+	// Create zip entry with just the filename (not full path)
+	basename := filepath.Base(filePath)
+	writer, err := zipWriter.Create(basename)
+	if err != nil {
+		return err
+	}
 
-// runObjectConversion processes objects of a specific kind
-func (bh *BH) runObjectConversion(spinner *ui.Spinner, row int, files []string, kind string) {
-	bh.runConversionWithProgress(spinner, row, func(progressCallback func(int, int)) {
-		bh.ProcessObjects(files, kind, progressCallback)
-	})
+	// Copy file contents to zip
+	_, err = io.Copy(writer, file)
+	return err
 }
