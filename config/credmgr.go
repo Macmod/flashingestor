@@ -230,8 +230,10 @@ func splitUserIntoDomainAndUsername(user string) (domain string, username string
 	switch {
 	case strings.Contains(user, "@"):
 		parts := strings.Split(user, "@")
-		if len(parts) == 2 {
-			return parts[1], parts[0]
+		if len(parts) >= 2 {
+			user := strings.Join(parts[0:len(parts)-1], "@")
+			domain := parts[len(parts)-1]
+			return domain, user
 		}
 
 		return "", user

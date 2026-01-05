@@ -484,7 +484,7 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 						Domain:      job.domain,
 					}
 				} else {
-					bh.Log <- fmt.Sprintf("[yellow]🫠 Could not resolve %s: %v[-]", job.dNSHostName, err)
+					bh.Log <- fmt.Sprintf("🫠 [yellow]Could not resolve %s: %v[-]", job.dNSHostName, err)
 				}
 			}
 		}()

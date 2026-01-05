@@ -393,7 +393,7 @@ func (m *IngestionManager) processTrustEntries() {
 			// Check if TRUST_DIRECTION_INBOUND (0x1) flag is absent
 			if trustDirection&0x1 == 0 {
 				m.logFunc(
-					"[yellow]🦘 Skipping \"%s\" (DIR=%d,ATTR=%d) as recurse_feasible_only is enabled and it's not inbound.[-]",
+					"🦘 [yellow]Skipping \"%s\" (DIR=%d,ATTR=%d) as recurse_feasible_only is enabled and it's not inbound.[-]",
 					trustName,
 					trustDirection,
 					trustAttributes,
@@ -406,7 +406,7 @@ func (m *IngestionManager) processTrustEntries() {
 				// Check if TRUST_ATTRIBUTE_NON_TRANSITIVE (0x1) flag is set
 				if trustAttributes&0x1 != 0 {
 					m.logFunc(
-						"[yellow]🦘 Skipping \"%s\" (DIR=%d,ATTR=%d) as recurse_feasible_only is enabled and it's nontransitive.[-]",
+						"🦘 [yellow]Skipping \"%s\" (DIR=%d,ATTR=%d) as recurse_feasible_only is enabled and it's nontransitive.[-]",
 						trustName,
 						trustDirection,
 						trustAttributes,

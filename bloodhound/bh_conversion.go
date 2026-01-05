@@ -84,7 +84,7 @@ func (bh *BH) loadRemoteComputerResults() map[string]*RemoteCollectionResult {
 	var results map[string]*RemoteCollectionResult
 	decoder := msgpack.NewDecoder(file)
 	if err := decoder.Decode(&results); err != nil {
-		bh.Log <- " [yellow]Warning: Could not decode remote computer results: " + err.Error() + "[-]"
+		bh.Log <- " 🫠 [yellow]Warning: Could not decode remote computer results: " + err.Error() + "[-]"
 		return nil
 	}
 
@@ -108,7 +108,7 @@ func (bh *BH) loadRemoteCAResults() map[string]*EnterpriseCARemoteCollectionResu
 	var results map[string]*EnterpriseCARemoteCollectionResult
 	decoder := msgpack.NewDecoder(file)
 	if err := decoder.Decode(&results); err != nil {
-		bh.Log <- "[yellow]⚠ Warning: Could not decode remote CA results:[-] " + err.Error()
+		bh.Log <- "🫠 [yellow]Warning: Could not decode remote CA results:[-] " + err.Error()
 		return nil
 	}
 
@@ -299,7 +299,7 @@ func (bh *BH) addWellKnownObjects(writer *BHFormatWriter, kind string, domainNam
 
 	domainSID, ok := builder.BState().DomainSIDCache.Get(domainName)
 	if !ok {
-		bh.Log <- "[yellow]🫠 Could not find domain SID for domain " + domainName + " to add well-known " + kind + "[-]"
+		bh.Log <- "🫠 [yellow]Could not find domain SID for domain " + domainName + " to add well-known " + kind + "[-]"
 		domainSID = "UNKNOWN"
 	}
 
@@ -1158,7 +1158,7 @@ func (bh *BH) compressBloodhoundOutput(step int) {
 	}
 
 	if len(filesToCompress) == 0 {
-		bh.Log <- "[yellow]🫠 No JSON files found to compress[-]"
+		bh.Log <- "🫠 [yellow]No JSON files found to compress[-]"
 		return
 	}
 
@@ -1238,7 +1238,7 @@ func (bh *BH) compressBloodhoundOutput(step int) {
 	if bh.RuntimeOptions.GetCleanupAfterCompression() {
 		for _, file := range filesToCompress {
 			if err := os.Remove(file); err != nil {
-				bh.Log <- "[yellow]🫠 Could not remove \"" + filepath.Base(file) + "\":[-] " + err.Error()
+				bh.Log <- "🫠 [yellow]Could not remove \"" + filepath.Base(file) + "\":[-] " + err.Error()
 			}
 		}
 		bh.Log <- fmt.Sprintf("🧹 Cleaned up %d original JSON files from \"%s\"", len(filesToCompress), bh.OutputFolder)
