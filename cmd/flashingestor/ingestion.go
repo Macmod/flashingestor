@@ -45,6 +45,7 @@ type IngestionManager struct {
 	resolver            *net.Resolver
 	ldapFolder          string
 	logFunc             func(string, ...interface{})
+	uiApp               *ui.Application
 	domainQueue         chan DomainRequest
 	trustEntriesChan    chan *ldap.Entry
 	configEntriesChan   chan *ldap.Entry
@@ -230,7 +231,6 @@ func (m *IngestionManager) checkMsgpackFilesExist() (bool, error) {
 
 func (m *IngestionManager) start(
 	ctx context.Context,
-	uiApp *ui.Application,
 	initialDomain string,
 	initialBaseDN string,
 	initialDC string,
@@ -287,7 +287,7 @@ func (m *IngestionManager) start(
 				}
 				continue
 			}
-			m.ingestDomain(ctx, uiApp, req.DomainName, req.BaseDN, req.DomainController)
+			m.ingestDomain(ctx, req.DomainName, req.BaseDN, req.DomainController)
 		}
 
 		// All domains have been processed, write forest structure and log final summary
@@ -499,29 +499,39 @@ func (m *IngestionManager) discoverDC(ctx context.Context, domainName string) (s
 	return discoveredDC, nil
 }
 
-func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Application, domainName, baseDN, domainController string) {
-	uiApp.AddDomainTab(domainName)
-	uiApp.SwitchToDomainTab(domainName)
-	uiApp.InsertIngestHeader(domainName)
+func (m *IngestionManager) notifyIngestionSkipped(domainName string) {
+	m.logFunc("🛑 [red]Skipping ingestion of \"%s\"[-]", domainName)
+
+	// Update all rows to show "Skipped" status
+	for _, job := range m.jobManager.jobs {
+		m.uiApp.UpdateIngestRow(domainName, job.Row, "[red]🛑 Skipped[-]", "", "", "", "", "")
+	}
+}
+
+func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN, domainController string) {
+	m.uiApp.AddDomainTab(domainName)
+	m.uiApp.SwitchToDomainTab(domainName)
+	m.uiApp.InsertIngestHeader(domainName)
 
 	currentDomainFolder := filepath.Join(m.ldapFolder, domainName)
 	if err := os.MkdirAll(currentDomainFolder, 0755); err != nil {
 		m.logFunc("❌ Failed to create domain folder: %v", err)
+		m.notifyIngestionSkipped(domainName)
 		return
 	}
 
 	jobs := m.jobManager.initializeJobs(m.queryDefs, m.includeACLs, nil)
-	spinner := ui.NewSpinner(uiApp, jobs, 0)
-	spinner.RegisterDomain(domainName, uiApp.GetDomainTable(domainName))
+	spinner := ui.NewSpinner(m.uiApp, jobs, 0)
+	spinner.RegisterDomain(domainName, m.uiApp.GetDomainTable(domainName))
 
 	for _, job := range jobs {
-		uiApp.SetupIngestRow(domainName, job.Row, job.Name)
+		m.uiApp.SetupIngestRow(domainName, job.Row, job.Name)
 	}
 
 	var aborted atomic.Bool
 	ctx, cancel := context.WithCancel(ctx)
 
-	uiApp.SetAbortCallback(func() {
+	m.uiApp.SetAbortCallback(func() {
 		if aborted.CompareAndSwap(false, true) {
 			m.logFunc("🛑 [red]Abort requested for LDAP ingestion...[-]")
 			m.globalAborted.Store(true) // Set global abort flag
@@ -529,13 +539,13 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 		}
 	})
 
-	uiApp.SetRunning(true, "ingestion")
+	m.uiApp.SetRunning(true, "ingestion")
 
 	defer func() {
 		spinner.Stop()
 		cancel()
-		uiApp.SetAbortCallback(nil)
-		uiApp.SetRunning(false, "")
+		m.uiApp.SetAbortCallback(nil)
+		m.uiApp.SetRunning(false, "")
 
 		// Track completion and close queue when all domains are done
 		if !aborted.Load() {
@@ -552,7 +562,7 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 	progressWg.Add(1)
 	go func() {
 		defer progressWg.Done()
-		m.handleProgressUpdates(uiApp, updates, jobs, domainName, &aborted, ingestStartTime)
+		m.handleProgressUpdates(updates, jobs, domainName, &aborted, ingestStartTime)
 	}()
 
 	spinner.Start()
@@ -567,6 +577,7 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 		discoveredDC, err := m.discoverDC(dnsCtx, domainName)
 		if err != nil {
 			m.logFunc("❌ [red]Failed to discover DC for \"%s\": %v[-]", domainName, err)
+			m.notifyIngestionSkipped(domainName)
 			return
 		}
 
@@ -615,24 +626,12 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 				ldapOptions = &fallbackLdapOptions
 			} else {
 				m.logFunc("❌ [red]LDAP fallback also failed for \"%s\": %v[-]", domainName, err)
-				m.logFunc("🛑 [red]Skipping ingestion of \"%s\"[-]", domainName)
-
-				// Update all rows to show "Skipped" status
-				for _, job := range jobs {
-					uiApp.UpdateIngestRow(domainName, job.Row, "[red]🛑 Skipped[-]", "", "", "", "", "")
-				}
-
+				m.notifyIngestionSkipped(domainName)
 				return
 			}
 		} else {
 			m.logFunc("❌ [red]LDAP connection test failed for \"%s\": %v[-]", domainName, err)
-			m.logFunc("🛑 [red]Skipping ingestion of \"%s\"[-]", domainName)
-
-			// Update all rows to show "Skipped" status
-			for _, job := range jobs {
-				uiApp.UpdateIngestRow(domainName, job.Row, "[red]🛑 Skipped[-]", "", "", "", "", "")
-			}
-
+			m.notifyIngestionSkipped(domainName)
 			return
 		}
 	}
@@ -709,25 +708,25 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, uiApp *ui.Applicati
 	progressWg.Wait() // Wait for all progress updates to be processed
 }
 
-func (m *IngestionManager) handleProgressUpdates(uiApp *ui.Application, updates chan gildap.ProgressUpdate, jobs []gildap.QueryJob, domainName string, aborted *atomic.Bool, ingestStartTime time.Time) {
+func (m *IngestionManager) handleProgressUpdates(updates chan gildap.ProgressUpdate, jobs []gildap.QueryJob, domainName string, aborted *atomic.Bool, ingestStartTime time.Time) {
 	errorCount := 0
 
 	for update := range updates {
 		elapsed := update.Elapsed.Round(10 * time.Millisecond).String()
 		if update.Aborted {
-			uiApp.UpdateIngestRow(domainName, update.Row, "[red]× Aborted", "", fmt.Sprintf("%d", update.Total), "", "", elapsed)
+			m.uiApp.UpdateIngestRow(domainName, update.Row, "[red]× Aborted", "", fmt.Sprintf("%d", update.Total), "", "", elapsed)
 			continue
 		}
 
 		if update.Err != nil {
 			errorCount++
-			uiApp.UpdateIngestRow(domainName, update.Row, "[red]× Error[-]", "", "", "-", "", "-")
+			m.uiApp.UpdateIngestRow(domainName, update.Row, "[red]× Error[-]", "", "", "-", "", "-")
 			m.logFunc("❌ [red]Error during ingestion of job \"%s\": %s[-]", jobs[update.Row-1].Name, update.Err.Error())
 			continue
 		}
 
 		if update.Done {
-			uiApp.UpdateIngestRow(domainName, update.Row, "[green]✓ Done", "", fmt.Sprintf("%d", update.Total), "-", "", elapsed)
+			m.uiApp.UpdateIngestRow(domainName, update.Row, "[green]✓ Done", "", fmt.Sprintf("%d", update.Total), "-", "", elapsed)
 			outputFile := jobs[update.Row-1].OutputFile
 			if outputFile != "" {
 				if fileInfo, err := os.Stat(outputFile); err == nil {
@@ -737,7 +736,7 @@ func (m *IngestionManager) handleProgressUpdates(uiApp *ui.Application, updates 
 				}
 			}
 		} else {
-			uiApp.UpdateIngestRow(domainName, update.Row, "", fmt.Sprintf("%d", update.Page), fmt.Sprintf("%d", update.Total), fmt.Sprintf("%.1f", update.Speed), fmt.Sprintf("%.1f", update.AvgSpeed), elapsed)
+			m.uiApp.UpdateIngestRow(domainName, update.Row, "", fmt.Sprintf("%d", update.Page), fmt.Sprintf("%d", update.Total), fmt.Sprintf("%.1f", update.Speed), fmt.Sprintf("%.1f", update.AvgSpeed), elapsed)
 		}
 	}
 

@@ -113,6 +113,7 @@ func main() {
 		queryDefs:           cfg.RuntimeOptions.GetQueries(),
 		ldapFolder:          dirs.LDAP,
 		logFunc:             logFunc,
+		uiApp:               uiApp,
 		ingestedDomains:     &sync.Map{},
 		includeACLs:         cfg.RuntimeOptions.GetIncludeACLs(),
 		recurseTrusts:       cfg.RuntimeOptions.GetRecurseTrusts(),
@@ -171,7 +172,7 @@ func main() {
 							ingestMgr.ingestedDomains.Store(strings.ToUpper(initialDomain), true)
 
 							ctx := context.Background()
-							ingestMgr.start(ctx, uiApp, initialDomain, initialBaseDN, initialDC)
+							ingestMgr.start(ctx, initialDomain, initialBaseDN, initialDC)
 						},
 						func() {
 							// User chose No - cancel ingestion
@@ -190,7 +191,7 @@ func main() {
 			ingestMgr.ingestedDomains.Store(strings.ToUpper(initialDomain), true)
 
 			ctx := context.Background()
-			ingestMgr.start(ctx, uiApp, initialDomain, initialBaseDN, initialDC)
+			ingestMgr.start(ctx, initialDomain, initialBaseDN, initialDC)
 		}
 	}
 
