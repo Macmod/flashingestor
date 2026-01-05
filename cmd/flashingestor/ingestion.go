@@ -370,6 +370,7 @@ func (m *IngestionManager) processTrustEntries() {
 
 		trustName := ldapEntry.GetAttrVal("name", "")
 		if trustName == "" {
+			m.logFunc("🫠 [yellow]Skipping trust with missing name attribute[-]")
 			continue
 		}
 

@@ -37,7 +37,7 @@ type Config struct {
 const DEFAULT_REMOTE_TIMEOUT = 3 * time.Second
 const DEFAULT_REMOTE_WORKERS = 50
 const DEFAULT_DNS_WORKERS = 10
-const DEFAULT_LDAP_TIMEOUT = 5 * time.Second
+const DEFAULT_LDAP_TIMEOUT = 30 * time.Second
 const DEFAULT_LDAP_SCHEME = "ldaps"
 
 const PORTCHECK_TIMEOUT = 2 * time.Second   // Generic timeout for port checking
