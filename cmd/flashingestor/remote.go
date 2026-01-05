@@ -115,6 +115,11 @@ func (r *RemoteCollectionManager) handleRemoteCollectionUpdates(updates <-chan c
 				spinner.SetDone(update.Step)
 			}
 			uiApp.UpdateRemoteCollectionRow(update.Step, "[red]× Aborted", "", "", "-", "", "-", "-", update.Elapsed)
+		} else if update.Status == "skipped" {
+			if spinner != nil {
+				spinner.SetDone(update.Step)
+			}
+			uiApp.UpdateRemoteCollectionRow(update.Step, "[yellow]- Skipped", "-", "-", "-", "-", "-", "-", "-")
 		} else {
 			// Progress update - format with colors
 			var processedText, percentText string

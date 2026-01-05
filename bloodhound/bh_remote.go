@@ -36,6 +36,8 @@ func NewRemoteCollector(authenticator *config.CredentialMgr, runtimeOptions *con
 
 type RemoteCollectionUpdate = core.RemoteCollectionUpdate
 
+const TotalRemoteSteps = 4
+
 // PerformRemoteCollection gathers data from computers and CAs using RPC and HTTP.
 func (bh *BH) PerformRemoteCollection(auth *config.CredentialMgr) {
 	// Initialize builder state
@@ -45,26 +47,42 @@ func (bh *BH) PerformRemoteCollection(auth *config.CredentialMgr) {
 	// Create remote collector with authentication options
 	collector := NewRemoteCollector(auth, bh.RuntimeOptions)
 
+	notifyAbort := func(currentStep int) bool {
+		if bh.IsAborted() {
+			// Mark remaining steps as skipped
+			for step := currentStep + 1; step <= TotalRemoteSteps; step++ {
+				if bh.RemoteCollectionUpdates != nil {
+					bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+						Step:   step,
+						Status: "skipped",
+					}
+				}
+			}
+			return true
+		}
+		return false
+	}
+
 	bh.runRemoteStep(1, func() { bh.loadRemoteCollectionCache(1) })
-	if bh.IsAborted() {
+	if notifyAbort(1) {
 		return
 	}
 
 	// Collect from Enterprise CAs
 	enterpriseCAs := bh.loadEnterpriseCATargets()
-	if bh.IsAborted() {
+	if notifyAbort(1) {
 		return
 	}
 
 	bh.runRemoteStep(2, func() { bh.collectEnterpriseCAData(2, enterpriseCAs, collector) })
-	if bh.IsAborted() {
+	if notifyAbort(2) {
 		return
 	}
 
 	// Collect from computers
 	var computers []CollectionTarget
 	bh.runRemoteStep(3, func() { computers = bh.loadComputerTargets(3) })
-	if bh.IsAborted() {
+	if notifyAbort(3) {
 		return
 	}
 
@@ -94,7 +112,7 @@ func (bh *BH) runRemoteStep(row int, stepFunc func()) {
 			bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
 				Step:    row,
 				Status:  "aborted",
-				Elapsed: elapsed.Round(time.Second).String(),
+				Elapsed: elapsed.Round(10 * time.Millisecond).String(),
 			}
 		}
 		return
@@ -104,7 +122,7 @@ func (bh *BH) runRemoteStep(row int, stepFunc func()) {
 		bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
 			Step:    row,
 			Status:  "done",
-			Elapsed: elapsed.Round(time.Second).String(),
+			Elapsed: elapsed.Round(10 * time.Millisecond).String(),
 		}
 	}
 }
@@ -132,7 +150,7 @@ func (bh *BH) loadRemoteCollectionCache(step int) {
 		for _, filePath := range filePaths {
 			// Check if this cache has already been loaded
 			if builder.BState().IsCacheLoaded(filePath) {
-				bh.Log <- fmt.Sprintf("🤷🏼 Skipped %s (already loaded)", filePath)
+				bh.Log <- fmt.Sprintf("🦘 Skipped %s (already loaded)", filePath)
 				continue
 			}
 
@@ -192,7 +210,7 @@ func (bh *BH) loadRemoteCollectionCache(step int) {
 				Speed:     metrics.speedText,
 				AvgSpeed:  metrics.avgSpeedText,
 				ETA:       metrics.etaText,
-				Elapsed:   elapsed.Round(time.Second).String(),
+				Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
 			}
 		}
 	}
@@ -354,7 +372,7 @@ func (bh *BH) collectEnterpriseCAData(step int, targets []EnterpriseCACollection
 				AvgSpeed:  metrics.avgSpeedText,
 				Success:   successText,
 				ETA:       metrics.etaText,
-				Elapsed:   elapsed.Round(time.Second).String(),
+				Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
 			}
 		}
 	}
@@ -527,7 +545,7 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 						AvgSpeed:  metrics.avgSpeedText,
 						Success:   successText,
 						ETA:       metrics.etaText,
-						Elapsed:   elapsed.Round(time.Second).String(),
+						Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
 					}
 				}
 			}
@@ -798,7 +816,7 @@ func (bh *BH) processComputerResults(step int, resultChan chan struct {
 					AvgSpeed:  fmt.Sprintf("%.1f/s", avgRate),
 					Success:   fmt.Sprintf("%d/%d (%.1f%%)", *successCount, len(computers), successPercent),
 					ETA:       eta.Round(time.Second).String(),
-					Elapsed:   elapsed.Round(time.Second).String(),
+					Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
 				}
 			}
 		}

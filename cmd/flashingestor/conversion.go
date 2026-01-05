@@ -87,6 +87,9 @@ func (c *ConversionManager) handleConversionUpdate(uiApp *ui.Application, spinne
 	case "aborted":
 		spinner.SetDone(row)
 		uiApp.UpdateConversionRow(row, "[red]× Aborted", "-", "-", "-", "-", "-", update.Elapsed)
+	case "skipped":
+		spinner.SetDone(row)
+		uiApp.UpdateConversionRow(row, "[yellow]- Skipped", "-", "-", "-", "-", "-", "-")
 	default:
 		// Progress update - format values with colors
 		var processedText, percentText string

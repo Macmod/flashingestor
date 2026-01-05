@@ -249,7 +249,7 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 							Speed:     metrics.speedText,
 							AvgSpeed:  metrics.avgSpeedText,
 							ETA:       metrics.etaText,
-							Elapsed:   elapsed.Round(time.Second).String(),
+							Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
 						}
 					}
 					batchCount = 0
@@ -447,7 +447,7 @@ func (bh *BH) ProcessDomain(step int) {
 					Speed:     metrics.speedText,
 					AvgSpeed:  metrics.avgSpeedText,
 					ETA:       metrics.etaText,
-					Elapsed:   elapsed.Round(time.Second).String(),
+					Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
 				}
 			}
 		}
@@ -647,7 +647,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 						Speed:     metrics.speedText,
 						AvgSpeed:  metrics.avgSpeedText,
 						ETA:       metrics.etaText,
-						Elapsed:   elapsed.Round(time.Second).String(),
+						Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
 					}
 				}
 				batchCount = 0
@@ -843,7 +843,7 @@ func (bh *BH) LoadSchemaInfo(step int) {
 					Speed:     metrics.speedText,
 					AvgSpeed:  metrics.avgSpeedText,
 					ETA:       metrics.etaText,
-					Elapsed:   elapsed.Round(time.Second).String(),
+					Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
 				}
 			}
 		}
@@ -857,24 +857,35 @@ type CacheJob struct {
 }
 
 // PerformConversion transforms LDAP data to BloodHound JSON format with progress tracking.
+const TotalConversionSteps = 11
+
 func (bh *BH) PerformConversion() {
 	// Update timestamp for this conversion run
 	bh.Timestamp = time.Now().Format("20060102150405")
 	bh.generatedFiles = make([]string, 0)
 
 	abortLogged := false
-	notifyAbort := func() bool {
+	notifyAbort := func(currentStep int) bool {
 		if bh.IsAborted() {
 			if !abortLogged && bh.Log != nil {
 				bh.Log <- "🛑 Conversion abort requested. Stopping remaining steps..."
 				abortLogged = true
+			}
+			// Mark remaining steps as skipped
+			for step := currentStep + 1; step <= TotalConversionSteps; step++ {
+				if bh.ConversionUpdates != nil {
+					bh.ConversionUpdates <- ConversionUpdate{
+						Step:   step,
+						Status: "skipped",
+					}
+				}
 			}
 			return true
 		}
 		return false
 	}
 
-	if notifyAbort() {
+	if notifyAbort(0) {
 		return
 	}
 
@@ -882,7 +893,7 @@ func (bh *BH) PerformConversion() {
 	forestMapPath := filepath.Join(bh.LdapFolder, "ForestDomains.json")
 	builder.BState().Init(forestMapPath)
 
-	if notifyAbort() {
+	if notifyAbort(0) {
 		return
 	}
 
@@ -892,59 +903,59 @@ func (bh *BH) PerformConversion() {
 
 	// Load cache and schema (rows 1-2)
 	bh.runConversionStep(1, func() { bh.loadConversionCache(1) })
-	if notifyAbort() {
+	if notifyAbort(1) {
 		return
 	}
 	bh.runConversionStep(2, func() { bh.LoadSchemaInfo(2) })
-	if notifyAbort() {
+	if notifyAbort(2) {
 		return
 	}
 
 	// Process domains and configuration (rows 3-4)
 	bh.runConversionStep(3, func() { bh.ProcessDomain(3) })
-	if notifyAbort() {
+	if notifyAbort(3) {
 		return
 	}
 
 	bh.runConversionStep(4, func() { bh.ProcessConfiguration(4) })
-	if notifyAbort() {
+	if notifyAbort(4) {
 		return
 	}
 
 	// Process all object types (rows 5-10)
 	gposPaths, _ := bh.GetPaths("gpos")
 	bh.runConversionStep(5, func() { bh.ProcessObjects(gposPaths, "gpos", 5) })
-	if notifyAbort() {
+	if notifyAbort(5) {
 		return
 	}
 
 	ousPaths, _ := bh.GetPaths("ous")
 	bh.runConversionStep(6, func() { bh.ProcessObjects(ousPaths, "ous", 6) })
-	if notifyAbort() {
+	if notifyAbort(6) {
 		return
 	}
 
 	containersPaths, _ := bh.GetPaths("containers")
 	bh.runConversionStep(7, func() { bh.ProcessObjects(containersPaths, "containers", 7) })
-	if notifyAbort() {
+	if notifyAbort(7) {
 		return
 	}
 
 	groupsPaths, _ := bh.GetPaths("groups")
 	bh.runConversionStep(8, func() { bh.ProcessObjects(groupsPaths, "groups", 8) })
-	if notifyAbort() {
+	if notifyAbort(8) {
 		return
 	}
 
 	computersPaths, _ := bh.GetPaths("computers")
 	bh.runConversionStep(9, func() { bh.ProcessObjects(computersPaths, "computers", 9) })
-	if notifyAbort() {
+	if notifyAbort(9) {
 		return
 	}
 
 	usersPaths, _ := bh.GetPaths("users")
 	bh.runConversionStep(10, func() { bh.ProcessObjects(usersPaths, "users", 10) })
-	if notifyAbort() {
+	if notifyAbort(10) {
 		return
 	}
 
@@ -980,7 +991,7 @@ func (bh *BH) runConversionStep(row int, stepFunc func()) {
 			bh.ConversionUpdates <- ConversionUpdate{
 				Step:    row,
 				Status:  "aborted",
-				Elapsed: elapsed.Round(time.Second).String(),
+				Elapsed: elapsed.Round(10 * time.Millisecond).String(),
 			}
 		}
 		return
@@ -990,7 +1001,7 @@ func (bh *BH) runConversionStep(row int, stepFunc func()) {
 		bh.ConversionUpdates <- ConversionUpdate{
 			Step:    row,
 			Status:  "done",
-			Elapsed: elapsed.Round(time.Second).String(),
+			Elapsed: elapsed.Round(10 * time.Millisecond).String(),
 		}
 	}
 }
@@ -1024,7 +1035,7 @@ func (bh *BH) loadConversionCache(step int) {
 		for _, filePath := range filePaths {
 			// Check if this cache has already been loaded
 			if builder.BState().IsCacheLoaded(filePath) {
-				bh.Log <- fmt.Sprintf("🤷🏼 Skipped %s (already loaded)", filePath)
+				bh.Log <- fmt.Sprintf("🦘 Skipped %s (already loaded)", filePath)
 				continue
 			}
 
@@ -1109,7 +1120,7 @@ func (bh *BH) loadConversionCache(step int) {
 				Speed:     speedText,
 				AvgSpeed:  avgSpeedText,
 				ETA:       etaText,
-				Elapsed:   elapsed.Round(time.Second).String(),
+				Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
 			}
 		}
 	}
@@ -1205,7 +1216,7 @@ func (bh *BH) compressBloodhoundOutput(step int) {
 				Speed:     metrics.speedText,
 				AvgSpeed:  metrics.avgSpeedText,
 				ETA:       metrics.etaText,
-				Elapsed:   elapsed.Round(time.Second).String(),
+				Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
 			}
 		}
 	}
