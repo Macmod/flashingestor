@@ -36,6 +36,12 @@ type JobManager struct {
 	jobs []gildap.QueryJob
 }
 
+// ForestCollectionStatus tracks which forest-wide data has been collected.
+type ForestCollectionStatus struct {
+	Configuration bool
+	Schema        bool
+}
+
 // IngestionManager orchestrates multi-domain LDAP ingestion.
 type IngestionManager struct {
 	jobManager          *JobManager
@@ -51,6 +57,7 @@ type IngestionManager struct {
 	configEntriesChan   chan *ldap.Entry
 	ingestedDomains     *sync.Map // tracks domains processed in current run
 	forestStructure     *sync.Map // maps domain names to their forest root domain names
+	collectedForests    *sync.Map // maps forest root to *ForestCollectionStatus
 	startTime           time.Time
 	domainCount         atomic.Int32 // tracks number of domains ingested
 	pendingDomains      atomic.Int32 // tracks domains queued but not yet completed
@@ -252,6 +259,7 @@ func (m *IngestionManager) start(
 	m.globalAborted.Store(false)
 	m.initialDomain = strings.ToUpper(initialDomain)
 	m.forestStructure = &sync.Map{}
+	m.collectedForests = &sync.Map{}
 
 	// Load existing forest domains
 	m.loadForestDomains()
@@ -385,7 +393,7 @@ func (m *IngestionManager) processTrustEntries() {
 			// Check if TRUST_DIRECTION_INBOUND (0x1) flag is absent
 			if trustDirection&0x1 == 0 {
 				m.logFunc(
-					"[yellow]🤷🏼 Skipping \"%s\" (DIR=%d,ATTR=%d) as recurse_feasible_only is enabled.[-]",
+					"[yellow]🦘 Skipping \"%s\" (DIR=%d,ATTR=%d) as recurse_feasible_only is enabled and it's not inbound.[-]",
 					trustName,
 					trustDirection,
 					trustAttributes,
@@ -398,7 +406,7 @@ func (m *IngestionManager) processTrustEntries() {
 				// Check if TRUST_ATTRIBUTE_NON_TRANSITIVE (0x1) flag is set
 				if trustAttributes&0x1 != 0 {
 					m.logFunc(
-						"[yellow]🤷🏼 Skipping \"%s\" (DIR=%d,ATTR=%d) as recurse_feasible_only is enabled and it's nontransitive.[-]",
+						"[yellow]🦘 Skipping \"%s\" (DIR=%d,ATTR=%d) as recurse_feasible_only is enabled and it's nontransitive.[-]",
 						trustName,
 						trustDirection,
 						trustAttributes,
@@ -412,7 +420,7 @@ func (m *IngestionManager) processTrustEntries() {
 
 		// Skip if already ingested in this run
 		if _, loaded := m.ingestedDomains.LoadOrStore(trustName, true); loaded {
-			//m.logFunc("⏭ [yellow]Skipping already-ingested domain: \"%s\"[-]", trustName)
+			//m.logFunc("🦘 [yellow]Skipping already-ingested domain: \"%s\"[-]", trustName)
 			continue
 		}
 
@@ -504,7 +512,7 @@ func (m *IngestionManager) notifyIngestionSkipped(domainName string) {
 
 	// Update all rows to show "Skipped" status
 	for _, job := range m.jobManager.jobs {
-		m.uiApp.UpdateIngestRow(domainName, job.Row, "[red]🛑 Skipped[-]", "", "", "", "", "")
+		m.uiApp.UpdateIngestRow(domainName, job.Row, "[yellow]- Skipped[-]", "", "", "", "", "")
 	}
 }
 
@@ -557,13 +565,6 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 
 	updates := make(chan gildap.ProgressUpdate)
 	ingestStartTime := time.Now()
-
-	var progressWg sync.WaitGroup
-	progressWg.Add(1)
-	go func() {
-		defer progressWg.Done()
-		m.handleProgressUpdates(updates, jobs, domainName, &aborted, ingestStartTime)
-	}()
 
 	spinner.Start()
 
@@ -639,6 +640,7 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 	m.logFunc("✅ [green]LDAP connection test successful for \"%s\"[-]", domainName)
 	forestRoot := ""
 	forestRootFolder := ""
+	var forestStatus *ForestCollectionStatus
 	if rootDN != "" {
 		forestRoot = gildap.DistinguishedNameToDomain(rootDN)
 		forestRootFolder = filepath.Join(m.ldapFolder, "FOREST+"+forestRoot)
@@ -657,6 +659,21 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 			m.logFunc("🔗 [blue]Forest root for \"%s\"[-]: \"%s\"", domainName, forestRoot)
 		}
 
+		// Get or create forest collection status
+		forestKey := strings.ToUpper(forestRoot)
+		statusVal, _ := m.collectedForests.LoadOrStore(forestKey, &ForestCollectionStatus{})
+		forestStatus = statusVal.(*ForestCollectionStatus)
+
+		if forestStatus.Configuration || forestStatus.Schema {
+			skipped := []string{}
+			if forestStatus.Configuration {
+				skipped = append(skipped, "Configuration")
+			}
+			if forestStatus.Schema {
+				skipped = append(skipped, "Schema")
+			}
+			m.logFunc("🦘 [yellow]%s already collected for forest \"%s\", skipping...[-]", strings.Join(skipped, " and "), forestRoot)
+		}
 	} else {
 		m.logFunc("🫠 [yellow]Could not determine forest root for \"%s\". Skipping forest-related ingestion...[-]", domainName)
 	}
@@ -667,26 +684,39 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 		m.logFunc(fmt.Sprintf("TARGET %v\n", target))
 	*/
 
+	for i, job := range jobs {
+		// For forest-wide queries, save in forest root folder if available;
+		// skip if forest root unavailable or already collected
+		if job.Name == "Configuration" {
+			jobs[i].BaseDN = "CN=Configuration," + rootDN
+			jobs[i].OutputFile = filepath.Join(forestRootFolder, "Configuration.msgpack")
+		} else if job.Name == "Schema" {
+			jobs[i].BaseDN = "CN=Schema,CN=Configuration," + rootDN
+			jobs[i].OutputFile = filepath.Join(forestRootFolder, "Schema.msgpack")
+		} else {
+			jobs[i].BaseDN = baseDN
+			jobs[i].OutputFile = filepath.Join(currentDomainFolder, jobs[i].Name+".msgpack")
+		}
+	}
+
+	// Launch progress handler, then launch jobs
+	var progressWg sync.WaitGroup
+	progressWg.Add(1)
+	go func() {
+		defer progressWg.Done()
+		m.handleProgressUpdates(updates, jobs, domainName, forestRoot, &aborted, ingestStartTime)
+	}()
+
 	var wg sync.WaitGroup
 	for i, job := range jobs {
-		// For forest-wide queries, save
-		// in forest root folder if available; otherwise, skip
-		// TODO: Mark as skipped in the table?
-		if job.Name == "Configuration" {
-			job.BaseDN = "CN=Configuration," + rootDN
-			job.OutputFile = filepath.Join(forestRootFolder, "Configuration.msgpack")
-			if forestRootFolder == "" {
-				continue
-			}
-		} else if job.Name == "Schema" {
-			job.BaseDN = "CN=Schema,CN=Configuration," + rootDN
-			job.OutputFile = filepath.Join(forestRootFolder, "Schema.msgpack")
-			if forestRootFolder == "" {
-				continue
-			}
-		} else {
-			job.BaseDN = baseDN
-			job.OutputFile = filepath.Join(currentDomainFolder, job.Name+".msgpack")
+		// Skip forest-wide jobs if already collected
+		if job.Name == "Configuration" && (forestRootFolder == "" || (forestStatus != nil && forestStatus.Configuration)) {
+			m.uiApp.UpdateIngestRow(domainName, job.Row, "[yellow]- Skipped[-]", "", "", "", "", "")
+			continue
+		}
+		if job.Name == "Schema" && (forestRootFolder == "" || (forestStatus != nil && forestStatus.Schema)) {
+			m.uiApp.UpdateIngestRow(domainName, job.Row, "[yellow]- Skipped[-]", "", "", "", "", "")
+			continue
 		}
 
 		wg.Add(1)
@@ -708,20 +738,43 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 	progressWg.Wait() // Wait for all progress updates to be processed
 }
 
-func (m *IngestionManager) handleProgressUpdates(updates chan gildap.ProgressUpdate, jobs []gildap.QueryJob, domainName string, aborted *atomic.Bool, ingestStartTime time.Time) {
+func (m *IngestionManager) handleProgressUpdates(updates chan gildap.ProgressUpdate, jobs []gildap.QueryJob, domainName, forestRoot string, aborted *atomic.Bool, ingestStartTime time.Time) {
 	errorCount := 0
+
+	// Helper to mark forest-wide collection status
+	setForestStatus := func(jobName string, collected bool) {
+		if forestRoot == "" || (jobName != "Configuration" && jobName != "Schema") {
+			return
+		}
+
+		statusVal, ok := m.collectedForests.Load(strings.ToUpper(forestRoot))
+		if !ok {
+			return
+		}
+
+		forestStatus := statusVal.(*ForestCollectionStatus)
+		if jobName == "Configuration" {
+			forestStatus.Configuration = collected
+		} else {
+			forestStatus.Schema = collected
+		}
+	}
 
 	for update := range updates {
 		elapsed := update.Elapsed.Round(10 * time.Millisecond).String()
+		jobName := jobs[update.Row-1].Name
+
 		if update.Aborted {
 			m.uiApp.UpdateIngestRow(domainName, update.Row, "[red]× Aborted", "", fmt.Sprintf("%d", update.Total), "", "", elapsed)
+			setForestStatus(jobName, false)
 			continue
 		}
 
 		if update.Err != nil {
 			errorCount++
 			m.uiApp.UpdateIngestRow(domainName, update.Row, "[red]× Error[-]", "", "", "-", "", "-")
-			m.logFunc("❌ [red]Error during ingestion of job \"%s\": %s[-]", jobs[update.Row-1].Name, update.Err.Error())
+			m.logFunc("❌ [red]Error during ingestion of job \"%s\": %s[-]", jobName, update.Err.Error())
+			setForestStatus(jobName, false)
 			continue
 		}
 
@@ -731,6 +784,7 @@ func (m *IngestionManager) handleProgressUpdates(updates chan gildap.ProgressUpd
 			if outputFile != "" {
 				if fileInfo, err := os.Stat(outputFile); err == nil {
 					m.logFunc("✅ Saved %s (%s)", outputFile, core.FormatFileSize(fileInfo.Size()))
+					setForestStatus(jobName, true)
 				} else {
 					m.logFunc("🫠 [yellow]Problem saving %s[-]", outputFile)
 				}
