@@ -156,12 +156,7 @@ func BuildDomainFromEntry(domainEntry *gildap.LDAPEntry, trustEntries []gildap.L
 
 		trustSidBytes := trustEntry.GetAttrRawVal("securityIdentifier", []byte{})
 
-		var trustSid string
-		if len(trustSidBytes) == 0 {
-			trustSid = ""
-		}
-
-		trustSid = gildap.ConvertSID(hex.EncodeToString(trustSidBytes))
+		trustSid := gildap.ConvertSID(hex.EncodeToString(trustSidBytes))
 
 		trust := DomainTrust{
 			Name:                 strings.ToUpper(trustEntry.GetAttrVal("name", "")),

@@ -239,12 +239,8 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 			// For trusts, cache the trust SID as well
 			trustName := strings.ToUpper(entry.GetAttrVal("cn", ""))
 			trustSidBytes := entry.GetAttrRawVal("securityIdentifier", []byte{})
-			var trustSid string
-			if len(trustSidBytes) == 0 {
-				trustSid = ""
-			}
 
-			trustSid = gildap.ConvertSID(hex.EncodeToString(trustSidBytes))
+			trustSid := gildap.ConvertSID(hex.EncodeToString(trustSidBytes))
 			st.DomainSIDCache.Set(trustName, trustSid)
 			st.SIDDomainCache.Set(trustSid, trustName)
 		} else if identifier == "containers" {
