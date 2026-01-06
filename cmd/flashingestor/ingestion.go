@@ -55,7 +55,7 @@ type IngestionManager struct {
 	domainQueue         chan DomainRequest
 	trustEntriesChan    chan *ldap.Entry
 	configEntriesChan   chan *ldap.Entry
-	ingestedDomains     *sync.Map // tracks domains processed in current run
+	processedDomains    *sync.Map // tracks domains processed in current run
 	forestStructure     *sync.Map // maps domain names to their forest root domain names
 	collectedForests    *sync.Map // maps forest root to *ForestCollectionStatus
 	startTime           time.Time
@@ -244,14 +244,8 @@ func (m *IngestionManager) start(
 ) {
 	// Recreate channels for each ingestion run
 	m.domainQueue = make(chan DomainRequest, 100)
-
-	if m.recurseTrusts {
-		m.trustEntriesChan = make(chan *ldap.Entry, 100)
-	}
-
-	if m.searchForest {
-		m.configEntriesChan = make(chan *ldap.Entry, 100)
-	}
+	m.trustEntriesChan = make(chan *ldap.Entry, 100)
+	m.configEntriesChan = make(chan *ldap.Entry, 100)
 
 	// Reset counters for new ingestion run
 	m.domainCount.Store(0)
@@ -265,13 +259,10 @@ func (m *IngestionManager) start(
 	m.loadForestDomains()
 
 	m.startTime = time.Now()
-	if m.recurseTrusts {
-		go m.processTrustEntries()
-	}
 
-	if m.searchForest {
-		go m.processConfigurationEntries()
-	}
+	// Additional domain discovery
+	go m.processTrustEntries()
+	go m.processConfigurationEntries()
 
 	m.pendingDomains.Add(1)
 	m.domainQueue <- DomainRequest{
@@ -336,7 +327,17 @@ func (m *IngestionManager) processConfigurationEntries() {
 		}
 		domainName = strings.ToUpper(domainName)
 
-		if _, loaded := m.ingestedDomains.LoadOrStore(domainName, true); loaded {
+		// Check if already processed; if not, store as processed
+		if _, loaded := m.processedDomains.LoadOrStore(domainName, true); loaded {
+			continue
+		}
+
+		// Always show discovered forest domain
+		m.logFunc("🔗 [green]New domain found in forest of \"%s\": \"%s\"[-]", sourceDomain, domainName)
+
+		// Only add to queue if searchForest is enabled
+		if !m.searchForest {
+			m.logFunc("🦘 [yellow]Not queueing \"%s\" - search_forest is disabled[-]", domainName)
 			continue
 		}
 
@@ -345,8 +346,6 @@ func (m *IngestionManager) processConfigurationEntries() {
 		}
 
 		baseDN := m.inferBaseDN(domainName)
-		m.logFunc("🔗 [green]Domain found in forest of \"%s\"[-]: \"%s\"", sourceDomain, domainName)
-
 		m.pendingDomains.Add(1)
 		m.domainQueue <- DomainRequest{
 			DomainName:       domainName,
@@ -376,6 +375,15 @@ func (m *IngestionManager) processTrustEntries() {
 
 		// Get source domain from the entry's DN (extract from CN=...,CN=System,DC=...)
 		sourceDomain := ldapEntry.GetDomainFromDN()
+		trustName = strings.ToUpper(trustName)
+
+		// Check if already processed; if not, store as processed
+		if _, loaded := m.processedDomains.LoadOrStore(trustName, true); loaded {
+			continue
+		}
+
+		// Show discovered trust
+		m.logFunc("🔗 [green]New domain found from \"%s\" trusts: \"%s\"[-]", sourceDomain, trustName)
 
 		// Filter by trust direction + transitivity if recurse_feasible_only is enabled
 		if m.recurseFeasibleOnly {
@@ -394,7 +402,7 @@ func (m *IngestionManager) processTrustEntries() {
 			// Check if TRUST_DIRECTION_INBOUND (0x1) flag is absent
 			if trustDirection&0x1 == 0 {
 				m.logFunc(
-					"🦘 [yellow]Skipping \"%s\" (DIR=%d,ATTR=%d) as recurse_feasible_only is enabled and it's not inbound.[-]",
+					"🦘 [yellow]Skipping \"%s\" (DIR=%d,ATTR=%d) - recurse_feasible_only is enabled and it's not inbound[-]",
 					trustName,
 					trustDirection,
 					trustAttributes,
@@ -407,7 +415,7 @@ func (m *IngestionManager) processTrustEntries() {
 				// Check if TRUST_ATTRIBUTE_NON_TRANSITIVE (0x1) flag is set
 				if trustAttributes&0x1 != 0 {
 					m.logFunc(
-						"🦘 [yellow]Skipping \"%s\" (DIR=%d,ATTR=%d) as recurse_feasible_only is enabled and it's nontransitive.[-]",
+						"🦘 [yellow]Skipping \"%s\" (DIR=%d,ATTR=%d) - recurse_feasible_only is enabled and it's nontransitive[-]",
 						trustName,
 						trustDirection,
 						trustAttributes,
@@ -417,11 +425,9 @@ func (m *IngestionManager) processTrustEntries() {
 			}
 		}
 
-		trustName = strings.ToUpper(trustName)
-
-		// Skip if already ingested in this run
-		if _, loaded := m.ingestedDomains.LoadOrStore(trustName, true); loaded {
-			//m.logFunc("🦘 [yellow]Skipping already-ingested domain: \"%s\"[-]", trustName)
+		// Only add to queue if recurseTrusts is enabled
+		if !m.recurseTrusts {
+			m.logFunc("🦘 [yellow]Not queueing \"%s\" - recurse_trusts is disabled[-]", trustName)
 			continue
 		}
 
@@ -431,8 +437,6 @@ func (m *IngestionManager) processTrustEntries() {
 		}
 
 		baseDN := m.inferBaseDN(trustName)
-		m.logFunc("🔗 [green]Domain found from \"%s\" trusts: \"%s\"[-]", sourceDomain, trustName)
-
 		m.pendingDomains.Add(1)
 		m.domainQueue <- DomainRequest{
 			DomainName:       trustName,

@@ -114,7 +114,7 @@ func main() {
 		ldapFolder:          dirs.LDAP,
 		logFunc:             logFunc,
 		uiApp:               uiApp,
-		ingestedDomains:     &sync.Map{},
+		processedDomains:    &sync.Map{},
 		includeACLs:         cfg.RuntimeOptions.GetIncludeACLs(),
 		recurseTrusts:       cfg.RuntimeOptions.GetRecurseTrusts(),
 		recurseFeasibleOnly: cfg.RuntimeOptions.GetRecurseFeasibleOnly(),
@@ -175,10 +175,10 @@ func main() {
 						func() {
 							// User chose Yes - proceed with ingestion
 							// Reset ingested domains tracker for new run
-							ingestMgr.ingestedDomains = &sync.Map{}
+							ingestMgr.processedDomains = &sync.Map{}
 
-							// Mark initial domain as ingested
-							ingestMgr.ingestedDomains.Store(strings.ToUpper(initialDomain), true)
+							// Mark initial domain as processed
+							ingestMgr.processedDomains.Store(strings.ToUpper(initialDomain), true)
 
 							ctx := context.Background()
 							ingestMgr.start(ctx, initialDomain, initialBaseDN, initialDC)
@@ -194,10 +194,10 @@ func main() {
 
 			// No prompt needed or no existing files - proceed with ingestion
 			// Reset ingested domains tracker for new run
-			ingestMgr.ingestedDomains = &sync.Map{}
+			ingestMgr.processedDomains = &sync.Map{}
 
-			// Mark initial domain as ingested
-			ingestMgr.ingestedDomains.Store(strings.ToUpper(initialDomain), true)
+			// Mark initial domain as processed
+			ingestMgr.processedDomains.Store(strings.ToUpper(initialDomain), true)
 
 			ctx := context.Background()
 			ingestMgr.start(ctx, initialDomain, initialBaseDN, initialDC)
