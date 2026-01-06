@@ -42,6 +42,7 @@ type LatencyStats struct {
 var (
 	domain    string
 	dnsServer string
+	dnsTCP    bool
 	retries   int
 	timeout   time.Duration
 	noColors  bool
@@ -72,6 +73,7 @@ func main() {
 func parseFlags() {
 	pflag.StringVarP(&domain, "domain", "d", "", "Domain name to query for DCs (required)")
 	pflag.StringVar(&dnsServer, "dns", "", "Custom DNS server (default: system resolver)")
+	pflag.BoolVar(&dnsTCP, "dns-tcp", false, "Use TCP for DNS queries instead of UDP")
 	pflag.IntVarP(&retries, "retries", "r", 1, "Number of retries for latency checks (for jitter calculation)")
 	pflag.DurationVarP(&timeout, "timeout", "t", 3*time.Second, "Timeout for each connection attempt")
 	pflag.BoolVarP(&noColors, "no-colors", "N", false, "Disable colored output")
@@ -96,6 +98,9 @@ func printConfiguration() {
 	if dnsServer != "" {
 		fmt.Printf("📡 Using custom DNS server: %s\n", cyan(dnsServer))
 	}
+	if dnsTCP {
+		fmt.Printf("🔌 Using TCP for DNS queries\n")
+	}
 	if retries > 1 {
 		fmt.Printf("🔁 Retries: %d (for jitter calculation)\n", retries)
 	}
@@ -103,11 +108,11 @@ func printConfiguration() {
 }
 
 func setupResolver() *net.Resolver {
-	if dnsServer == "" {
+	if dnsServer == "" && !dnsTCP {
 		return &net.Resolver{}
 	}
 
-	if !strings.Contains(dnsServer, ":") {
+	if dnsServer != "" && !strings.Contains(dnsServer, ":") {
 		dnsServer = dnsServer + ":53"
 	}
 
@@ -115,7 +120,13 @@ func setupResolver() *net.Resolver {
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			d := net.Dialer{Timeout: timeout}
-			return d.DialContext(ctx, network, dnsServer)
+			if dnsTCP {
+				network = "tcp"
+			}
+			if dnsServer != "" {
+				address = dnsServer
+			}
+			return d.DialContext(ctx, network, address)
 		},
 	}
 }
@@ -485,7 +496,7 @@ func testPing(host string, timeout time.Duration) (time.Duration, error) {
 
 	pinger.Count = 1
 	pinger.Timeout = timeout
-	pinger.SetPrivileged(true) // Use unprivileged mode
+	//pinger.SetPrivileged(true)
 
 	err = pinger.Run()
 	if err != nil {
