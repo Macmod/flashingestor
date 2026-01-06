@@ -163,6 +163,18 @@ func (opts *RuntimeOptions) IsMethodEnabled(method string) bool {
 	return false
 }
 
+// DisableMethod removes a specific collection method from the enabled list
+func (opts *RuntimeOptions) DisableMethod(method string) {
+	opts.mu.Lock()
+	defer opts.mu.Unlock()
+	for i, m := range opts.RemoteCollection.Methods {
+		if m == method {
+			opts.RemoteCollection.Methods = append(opts.RemoteCollection.Methods[:i], opts.RemoteCollection.Methods[i+1:]...)
+			return
+		}
+	}
+}
+
 // GetQueries returns a copy of the query definitions
 func (opts *RuntimeOptions) GetQueries() []QueryDefinition {
 	opts.mu.RLock()

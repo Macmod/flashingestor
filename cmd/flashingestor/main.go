@@ -132,6 +132,15 @@ func main() {
 		logFunc("🔗 [blue]Auth method (remote collection)[-]: " + cfg.ChosenAuthRemote)
 	}
 
+	// Temporary restriction until a better solution is implemented
+	// TODO: Allow for NTHash too?
+	if cfg.RuntimeOptions.IsMethodEnabled("certservices") {
+		if cfg.ChosenAuthRemote != "Password" {
+			logFunc("🫠 [yellow]CertServices disabled (not supported for this auth method)[-]")
+			cfg.RuntimeOptions.DisableMethod("certservices")
+		}
+	}
+
 	var initialDomain, initialBaseDN, initialDC string
 	if !disableIngest {
 		initialDomain = strings.ToUpper(cfg.IngestAuth.Creds().Domain)
