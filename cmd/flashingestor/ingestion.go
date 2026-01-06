@@ -464,23 +464,20 @@ func (m *IngestionManager) discoverDC(ctx context.Context, domainName string) (s
 	var discoveredDC string
 	var dcHost string
 
-	// Currently only falls back to the ldap lookup if the
-	// ldaps lookup doesn't work. Maybe we should try the other
-	// way around too?
+	// SRV lookup for LDAP
+	// Netlogon does not create _ldaps._tcp records, so we shouldn't check for these
+	_, addrs, err := m.resolver.LookupSRV(ctx, "ldap", "tcp", domainName)
 
-	// SRV lookups for LDAP / LDAPS
-	_, addrs, err := m.resolver.LookupSRV(ctx, m.ldapAuthOptions.Scheme, "tcp", domainName)
-	if err != nil {
+	port := 389
+	if err == nil && len(addrs) > 0 {
+		// Maybe the port was changed for crazy reasons?
+		port = int(addrs[0].Port)
 		if strings.EqualFold(m.ldapAuthOptions.Scheme, "ldaps") {
-			_, addrs, srvLDAPErr := m.resolver.LookupSRV(ctx, "ldap", "tcp", domainName)
-			if srvLDAPErr == nil && len(addrs) > 0 {
-				dcHost = strings.TrimRight(addrs[0].Target, ".")
-				discoveredDC = dcHost + ":636"
-			}
+			port = 636
 		}
-	} else if len(addrs) > 0 {
+
 		dcHost = strings.TrimRight(addrs[0].Target, ".")
-		discoveredDC = dcHost + ":" + strconv.Itoa(int(addrs[0].Port))
+		discoveredDC = dcHost + ":" + strconv.Itoa(port)
 	}
 
 	// Fallback to A record lookup if no SRV records found
