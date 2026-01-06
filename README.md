@@ -29,10 +29,12 @@ The main difference resource-wise is that `flashingestor` needs a bit more space
 
 ## Not Implemented
 
+### Remote Collection
+
 * `GPOChanges` collection is not implemented for `Domain` / `OrganizationalUnit` types.
 * `SmbInfo` and `Status` collections are not implemented for the `Computer` type.
 * `HttpEnrollmentEndpoints` only works with a provided username/password.
-* `HostingComputer` resolution is still a basic implementation.
+* `HostingComputer` resolution for the `EnterpriseCA` type is still a basic implementation.
 * `ldapsigning` is not collected for DC `Computer` objects; `ldapsepa` is prone to false positives.
 
 # Installation
