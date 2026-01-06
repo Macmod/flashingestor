@@ -496,7 +496,7 @@ func testPing(host string, timeout time.Duration) (time.Duration, error) {
 
 	pinger.Count = 1
 	pinger.Timeout = timeout
-	//pinger.SetPrivileged(true)
+	pinger.SetPrivileged(true)
 
 	err = pinger.Run()
 	if err != nil {
