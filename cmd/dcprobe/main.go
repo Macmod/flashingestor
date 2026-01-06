@@ -687,14 +687,17 @@ func formatTestValue(result DCResult, test testColumn, minLatencies map[string]t
 	stats := test.getVal(result)
 
 	if stats != nil {
-		value := fmt.Sprintf("%v", stats.Avg.Round(time.Microsecond))
+		var valueRtt, valueJitter string
+		valueRtt = fmt.Sprintf("%v", stats.Avg.Round(time.Microsecond))
 		if stats.Jitter > 0 {
-			value += fmt.Sprintf("\n(±%v)", stats.Jitter.Round(time.Microsecond))
+			valueJitter = fmt.Sprintf("(±%v)", stats.Jitter.Round(time.Microsecond))
 		}
+
 		if stats.Avg == minLatencies[test.key] {
-			return green(value), true
+			return green(valueRtt) + "\n" + valueJitter, true
 		}
-		return value, false
+
+		return valueRtt + "\n" + valueJitter, false
 	}
 
 	if hasTestError(result, test.key) {
