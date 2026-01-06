@@ -106,7 +106,7 @@ func BuildUserFromEntry(entry *gildap.LDAPEntry) (*User, bool) {
 
 	if len(props.AllowedToDelegate) > 0 {
 		for _, target := range props.AllowedToDelegate {
-			resolvedTargetSid, ok := ResolveHostToSid(target, baseProps.Domain)
+			resolvedTargetSid, ok := ResolveSpn(target, baseProps.Domain)
 			if !ok {
 				// TODO: Review what to do in this case?
 				continue
@@ -143,7 +143,7 @@ func BuildUserFromEntry(entry *gildap.LDAPEntry) (*User, bool) {
 				}
 			}
 
-			hostSid, ok := ResolveHostToSid(spn, baseProps.Domain)
+			hostSid, ok := ResolveSpn(spn, baseProps.Domain)
 
 			if ok && strings.HasPrefix(hostSid, "S-1") {
 				user.SPNTargets = append(user.SPNTargets, SPNPrivilege{

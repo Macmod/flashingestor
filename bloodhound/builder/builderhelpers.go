@@ -14,7 +14,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Macmod/flashingestor/config"
 	gildap "github.com/Macmod/flashingestor/ldap"
+	"github.com/Macmod/flashingestor/msrpc"
 	"github.com/cespare/xxhash/v2"
 )
 
@@ -472,41 +474,13 @@ func RequestNETBIOSNameFromComputer(ctx context.Context, ipAddress string, timeo
 	return strings.ToUpper(netbiosName), true
 }
 
-// ResolveHostToSid attempts to resolve a hostname to its computer account SID
-// Returns (success bool, SID string)
-func ResolveHostToSid(host string, domain string) (string, bool) {
-	// Remove SPN prefixes from the host name so we're working with a clean name
-	strippedHost := strings.ToUpper(strings.TrimSuffix(stripServicePrincipalName(host), "$"))
-	if strippedHost == "" {
-		return "", false
-	}
-
-	// TODO:
-	// Original SharpHound does two extra steps to find the computer account;
-	// we should implement these in the future:
-	// 1) Try NetWkstaGetInfo to get the computer name and domain
-	// 2) Try to resolve via a NetBIOS query
-	/*
-		if netbiosName, ok := RequestNETBIOSNameFromComputer(context.Background(), strippedHost, 2*time.Second); ok {
-			...
-		}
-	*/
-
-	if net.ParseIP(strippedHost) != nil {
-		// Fall back to DNS reverse lookup
-		addrs, err := net.LookupAddr(strippedHost)
-		if err == nil && len(addrs) > 0 {
-			// Use the first resolved hostname
-			strippedHost = strings.TrimSuffix(addrs[0], ".")
-		}
-	}
-
+func ResolveHostnameInCaches(host string, domain string) (string, bool) {
 	// Check if we already have this host cached in HostDnsCache
-	if entry, ok := BState().HostDnsCache.Get(domain + "+" + strippedHost); ok {
+	if entry, ok := BState().HostDnsCache.Get(domain + "+" + host); ok {
 		return entry.ObjectIdentifier, true
 	}
 
-	split := strings.Split(strippedHost, ".")
+	split := strings.Split(host, ".")
 	name := split[0]
 
 	// Check the SamCache for HOST$ in the specified domain
@@ -523,4 +497,57 @@ func ResolveHostToSid(host string, domain string) (string, bool) {
 	}
 
 	return "", false
+}
+
+// ResolveSpn resolves a service principal name (SPN) to a computer SID using caches
+// This is different from SharpHound's implementation of ResolveHostToSid in which
+// they try to issue (1) NetrWkstaGetInfo, (2) reverse DNS (if the strippedHost is an IP) and (3) NetBIOS
+// In our current implementation we only check our existing caches, which might lead to false negatives
+// Also, SharpHound uses the same ResolveHostToSid to map SPNs in AllowedToDelegateTo / ServicePrincipalNames and
+// for resolving the hosting computer of an Enterprise CA,
+// whereas we split these two use cases into ResolveSpn and ResolveHostname respectively.
+func ResolveSpn(host string, domain string) (string, bool) {
+	// Remove SPN prefixes from the host name so we're working with a clean name
+	strippedHost := strings.ToUpper(strings.TrimSuffix(stripServicePrincipalName(host), "$"))
+	if strippedHost == "" {
+		return "", false
+	}
+
+	return ResolveHostnameInCaches(strippedHost, domain)
+}
+
+// Original function kept for completeness
+func ResolveHostname(ctx context.Context, auth *config.CredentialMgr, host string, domain string) (string, bool) {
+	/*
+		// Removed reverse DNS as it should never happen
+		// for an object to have an IP address as its dNSHostName
+		if net.ParseIP(host) != nil {
+			// Fall back to DNS reverse lookup
+			addrs, err := net.LookupAddr(host)
+			if err == nil && len(addrs) > 0 {
+				// Use the first resolved hostname
+				host = strings.TrimSuffix(addrs[0], ".")
+			}
+		}
+	*/
+
+	rpcObj, err := msrpc.NewWkssvcRPC(ctx, host, auth)
+	if err == nil {
+		defer rpcObj.Close()
+	}
+
+	wkstaInfo, err := rpcObj.GetWkstaInfo(ctx)
+	if err == nil {
+		host = wkstaInfo.ComputerName
+		domain = wkstaInfo.LANGroup
+	}
+
+	// TODO: Original SharpHound does an extra NetBIOS query to find the name if NetrWkstaGetInfo fails
+	/*
+		if netbiosName, ok := RequestNETBIOSNameFromComputer(context.Background(), strippedHost, 2*time.Second); ok {
+			...
+		}
+	*/
+
+	return ResolveHostnameInCaches(host, domain)
 }

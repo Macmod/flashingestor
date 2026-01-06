@@ -62,7 +62,7 @@ func (rc *RemoteCollector) collectHttpEnrollmentEndpoints(ctx context.Context, c
 func (rc *RemoteCollector) CollectRemoteEnterpriseCA(ctx context.Context, target EnterpriseCACollectionTarget) EnterpriseCARemoteCollectionResult {
 	result := EnterpriseCARemoteCollectionResult{}
 
-	objectSid, ok := builder.ResolveHostToSid(target.DNSHostName, target.Domain)
+	objectSid, ok := builder.ResolveHostname(ctx, rc.auth, target.DNSHostName, target.Domain)
 	if ok {
 		result.HostingComputer = objectSid
 	}

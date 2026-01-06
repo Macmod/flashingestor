@@ -131,7 +131,7 @@ func BuildComputerFromEntry(entry *gildap.LDAPEntry) (*Computer, bool) {
 
 	if len(computer.Properties.AllowedToDelegate) > 0 {
 		for _, target := range computer.Properties.AllowedToDelegate {
-			resolvedTargetSid, ok := ResolveHostToSid(target, baseProps.Domain)
+			resolvedTargetSid, ok := ResolveSpn(target, baseProps.Domain)
 			if !ok {
 				// TODO: Review what to do in this case?
 				continue
