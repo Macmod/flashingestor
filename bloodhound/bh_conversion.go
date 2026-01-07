@@ -142,9 +142,7 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 	bh.log("📝 Writing %s to '%s'", kind, fileName)
 
 	totalCount := 0
-	batchCount := 0
 	totalInFiles := 0
-	const progressInterval = 10
 
 	startTime := time.Now()
 	lastUpdateTime := startTime
@@ -233,26 +231,22 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 			if ok {
 				writer.Add(bhObject)
 				totalCount++
-				batchCount++
 
-				if batchCount >= progressInterval {
-					if bh.ConversionUpdates != nil {
-						elapsed := time.Since(startTime)
-						percentage := float64(totalCount) / float64(totalInFiles) * 100.0
-						metrics := calculateProgressMetrics(totalCount, totalInFiles, startTime, &lastUpdateTime, &lastCount)
+				if bh.ConversionUpdates != nil {
+					elapsed := time.Since(startTime)
+					percentage := float64(totalCount) / float64(totalInFiles) * 100.0
+					metrics := calculateProgressMetrics(totalCount, totalInFiles, startTime, &lastUpdateTime, &lastCount)
 
-						bh.ConversionUpdates <- ConversionUpdate{
-							Step:      step,
-							Processed: totalCount,
-							Total:     totalInFiles,
-							Percent:   percentage,
-							Speed:     metrics.speedText,
-							AvgSpeed:  metrics.avgSpeedText,
-							ETA:       metrics.etaText,
-							Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
-						}
+					bh.ConversionUpdates <- ConversionUpdate{
+						Step:      step,
+						Processed: totalCount,
+						Total:     totalInFiles,
+						Percent:   percentage,
+						Speed:     metrics.speedText,
+						AvgSpeed:  metrics.avgSpeedText,
+						ETA:       metrics.etaText,
+						Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
 					}
-					batchCount = 0
 				}
 			}
 
@@ -599,8 +593,6 @@ func (bh *BH) ProcessConfiguration(step int) {
 	}
 
 	processedCount := 0
-	batchCount := 0
-	const progressInterval = 50
 
 	originalEntry := new(ldap.Entry)
 	var entry gildap.LDAPEntry
@@ -631,26 +623,22 @@ func (bh *BH) ProcessConfiguration(step int) {
 			bh.processConfigurationEntry(&entry)
 
 			processedCount++
-			batchCount++
 
-			if batchCount >= progressInterval {
-				if bh.ConversionUpdates != nil {
-					elapsed := time.Since(startTime)
-					percentage := float64(processedCount) / float64(totalInFiles) * 100.0
-					metrics := calculateProgressMetrics(processedCount, totalInFiles, startTime, &lastUpdateTime, &lastCount)
+			if bh.ConversionUpdates != nil {
+				elapsed := time.Since(startTime)
+				percentage := float64(processedCount) / float64(totalInFiles) * 100.0
+				metrics := calculateProgressMetrics(processedCount, totalInFiles, startTime, &lastUpdateTime, &lastCount)
 
-					bh.ConversionUpdates <- ConversionUpdate{
-						Step:      step,
-						Processed: processedCount,
-						Total:     totalInFiles,
-						Percent:   percentage,
-						Speed:     metrics.speedText,
-						AvgSpeed:  metrics.avgSpeedText,
-						ETA:       metrics.etaText,
-						Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
-					}
+				bh.ConversionUpdates <- ConversionUpdate{
+					Step:      step,
+					Processed: processedCount,
+					Total:     totalInFiles,
+					Percent:   percentage,
+					Speed:     metrics.speedText,
+					AvgSpeed:  metrics.avgSpeedText,
+					ETA:       metrics.etaText,
+					Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
 				}
-				batchCount = 0
 			}
 		}
 
