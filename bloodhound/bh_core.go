@@ -79,7 +79,7 @@ type BH struct {
 	LdapFolder                   string
 	OutputFolder                 string
 	ActiveFolder                 string
-	Log                          chan<- string
+	Log                          chan<- core.LogMessage
 	RuntimeOptions               *config.RuntimeOptions
 	Resolver                     *net.Resolver
 	RemoteWorkers                int
@@ -101,7 +101,7 @@ func (bh *BH) GetPaths(fileKey string) ([]string, error) {
 }
 
 // Init initializes the BloodHound processor with necessary parameters
-func (bh *BH) Init(ldapFolder string, activeFolder string, outputFolder string, customResolver *net.Resolver, remoteWorkers int, dnsWorkers int, remoteTimeout time.Duration, runtimeOptions *config.RuntimeOptions, log chan<- string) {
+func (bh *BH) Init(ldapFolder string, activeFolder string, outputFolder string, customResolver *net.Resolver, remoteWorkers int, dnsWorkers int, remoteTimeout time.Duration, runtimeOptions *config.RuntimeOptions, log chan<- core.LogMessage) {
 	bh.FilesMap = NewBHFilesMap()
 
 	bh.RemoteTimeout = remoteTimeout
@@ -160,4 +160,26 @@ func (bh *BH) RequestAbort() bool {
 // IsAborted reports whether an abort was requested.
 func (bh *BH) IsAborted() bool {
 	return bh.abortFlag.Load()
+}
+
+// log sends a normal priority log message (level 0).
+func (bh *BH) log(format string, args ...interface{}) {
+	if bh.Log != nil {
+		message := format
+		if len(args) > 0 {
+			message = fmt.Sprintf(format, args...)
+		}
+		bh.Log <- core.LogMessage{Message: message, Level: 0}
+	}
+}
+
+// logVerbose sends a verbose log message (level 1).
+func (bh *BH) logVerbose(format string, args ...interface{}) {
+	if bh.Log != nil {
+		message := format
+		if len(args) > 0 {
+			message = fmt.Sprintf(format, args...)
+		}
+		bh.Log <- core.LogMessage{Message: message, Level: 1}
+	}
 }

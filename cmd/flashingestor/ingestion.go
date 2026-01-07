@@ -51,6 +51,7 @@ type IngestionManager struct {
 	resolver            *net.Resolver
 	ldapFolder          string
 	logFunc             func(string, ...interface{})
+	logVerbose          func(string, ...interface{})
 	uiApp               *ui.Application
 	domainQueue         chan DomainRequest
 	trustEntriesChan    chan *ldap.Entry
@@ -169,7 +170,7 @@ func (m *IngestionManager) loadForestDomains() {
 		for domain, forestRoot := range existingForest {
 			m.forestStructure.Store(domain, forestRoot)
 		}
-		m.logFunc("📂 [blue]Loaded %d existing forest domain mapping(s)[-]", len(existingForest))
+		m.logVerbose("📂 [blue]Loaded %d existing forest domain mapping(s)[-]", len(existingForest))
 	}
 }
 
@@ -199,7 +200,7 @@ func (m *IngestionManager) saveForestDomains() {
 		m.logFunc("🫠 [yellow]Failed to write forest structure: %v[-]", err)
 	} else {
 		if fileInfo, err := os.Stat(forestFile); err == nil {
-			m.logFunc("✅ Saved %s (%s)", forestFile, core.FormatFileSize(fileInfo.Size()))
+			m.logVerbose("✅ Saved %s (%s)", forestFile, core.FormatFileSize(fileInfo.Size()))
 		}
 	}
 }
@@ -514,11 +515,12 @@ func (m *IngestionManager) notifyIngestionSkipped(domainName string) {
 
 	// Update all rows to show "Skipped" status
 	for _, job := range m.jobManager.jobs {
-		m.uiApp.UpdateIngestRow(domainName, job.Row, "[yellow]- Skipped[-]", "", "", "", "", "")
+		m.uiApp.UpdateIngestRow(domainName, job.Row, "[yellow]- Skipped[-]", "-", "-", "-", "-", "-")
 	}
 }
 
 func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN, domainController string) {
+	m.logFunc("-")
 	m.uiApp.AddDomainTab(domainName)
 	m.uiApp.SwitchToDomainTab(domainName)
 	m.uiApp.InsertIngestHeader(domainName)
@@ -713,11 +715,11 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 	for i, job := range jobs {
 		// Skip forest-wide jobs if already collected
 		if job.Name == "Configuration" && (forestRootFolder == "" || (forestStatus != nil && forestStatus.Configuration)) {
-			m.uiApp.UpdateIngestRow(domainName, job.Row, "[yellow]- Skipped[-]", "", "", "", "", "")
+			m.uiApp.UpdateIngestRow(domainName, job.Row, "[yellow]- Skipped[-]", "-", "-", "-", "-", "-")
 			continue
 		}
 		if job.Name == "Schema" && (forestRootFolder == "" || (forestStatus != nil && forestStatus.Schema)) {
-			m.uiApp.UpdateIngestRow(domainName, job.Row, "[yellow]- Skipped[-]", "", "", "", "", "")
+			m.uiApp.UpdateIngestRow(domainName, job.Row, "[yellow]- Skipped[-]", "-", "-", "-", "-", "-")
 			continue
 		}
 
@@ -785,7 +787,7 @@ func (m *IngestionManager) handleProgressUpdates(updates chan gildap.ProgressUpd
 			outputFile := jobs[update.Row-1].OutputFile
 			if outputFile != "" {
 				if fileInfo, err := os.Stat(outputFile); err == nil {
-					m.logFunc("✅ Saved %s (%s)", outputFile, core.FormatFileSize(fileInfo.Size()))
+					m.logVerbose("✅ Saved %s (%s)", outputFile, core.FormatFileSize(fileInfo.Size()))
 					setForestStatus(jobName, true)
 				} else {
 					m.logFunc("🫠 [yellow]Problem saving %s[-]", outputFile)

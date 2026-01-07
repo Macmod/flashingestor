@@ -41,6 +41,7 @@ const DEFAULT_LDAP_TIMEOUT = 30 * time.Second
 const DEFAULT_LDAP_SCHEME = "ldaps"
 
 const PORTCHECK_TIMEOUT = 2 * time.Second   // Generic timeout for port checking
+const NETBIOS_TIMEOUT = 2 * time.Second     // Timeout for NetBIOS
 const HTTP_TIMEOUT = 3 * time.Second        // Timeout for HTTP
 const DCERPC_EPM_TIMEOUT = 2 * time.Second  // Timeout for DCE/RPC endpoint mapper
 const KERBEROS_TIMEOUT = 2 * time.Second    // Timeout for Kerberos

@@ -84,12 +84,12 @@ func (bh *BH) loadRemoteComputerResults() map[string]*RemoteCollectionResult {
 	var results map[string]*RemoteCollectionResult
 	decoder := msgpack.NewDecoder(file)
 	if err := decoder.Decode(&results); err != nil {
-		bh.Log <- " 🫠 [yellow]Warning: Could not decode remote computer results: " + err.Error() + "[-]"
+		bh.log(" 🫠 [yellow]Warning: Could not decode remote computer results: %s[-]", err.Error())
 		return nil
 	}
 
 	if len(results) > 0 {
-		bh.Log <- "📦 Loaded remote collection data for " + strconv.Itoa(len(results)) + " Computers"
+		bh.log("📦 Loaded remote collection data for %s Computers", strconv.Itoa(len(results)))
 	}
 
 	return results
@@ -108,12 +108,12 @@ func (bh *BH) loadRemoteCAResults() map[string]*EnterpriseCARemoteCollectionResu
 	var results map[string]*EnterpriseCARemoteCollectionResult
 	decoder := msgpack.NewDecoder(file)
 	if err := decoder.Decode(&results); err != nil {
-		bh.Log <- "🫠 [yellow]Warning: Could not decode remote CA results:[-] " + err.Error()
+		bh.log("🫠 [yellow]Warning: Could not decode remote CA results:[-] %v", err)
 		return nil
 	}
 
 	if len(results) > 0 {
-		bh.Log <- "📦 Loaded remote collection data for " + strconv.Itoa(len(results)) + " Enterprise CAs"
+		bh.log("📦 Loaded remote collection data for %s Enterprise CAs", strconv.Itoa(len(results)))
 	}
 
 	return results
@@ -122,7 +122,7 @@ func (bh *BH) loadRemoteCAResults() map[string]*EnterpriseCARemoteCollectionResu
 func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 	writer, err := bh.GetCurrentWriter(kind)
 	if err != nil {
-		bh.Log <- "❌ Error getting writer for kind " + kind + ": " + err.Error()
+		bh.log("❌ Error getting writer for kind %s: %v", kind, err)
 		return 0
 	}
 
@@ -132,14 +132,14 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 		// Log file size after writer has been closed and flushed
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(fileName); err == nil {
-				bh.Log <- fmt.Sprintf("✅ [green]Written %s (%s)[-]", fileName, formatFileSize(fileInfo.Size()))
+				bh.log("✅ [green]Written %s (%s)[-]", fileName, formatFileSize(fileInfo.Size()))
 			} else {
-				bh.Log <- fmt.Sprintf("🫠 [yellow]Problem saving %s: %v[-]", fileName, err)
+				bh.log("🫠 [yellow]Problem saving %s: %v[-]", fileName, err)
 			}
 		}
 	}()
 
-	bh.Log <- "📝 Writing " + kind + " to '" + fileName + "'"
+	bh.log("📝 Writing %s to '%s'", kind, fileName)
 
 	totalCount := 0
 	batchCount := 0
@@ -154,7 +154,7 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 	for _, fileName := range fileNames {
 		reader, err := reader.NewMPReader(fileName)
 		if err != nil {
-			bh.Log <- "❌ Error opening file " + fileName + ": " + err.Error()
+			bh.log("❌ Error opening file %s: %v", fileName, err)
 			return 0
 		}
 		defer reader.Close()
@@ -186,7 +186,7 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 		for i := 0; i < reader.Length(); i++ {
 			err := reader.ReadEntry(originalEntry)
 			if err != nil {
-				bh.Log <- "❌ Error decoding entry: " + err.Error()
+				bh.log("❌ Error decoding entry: %v", err)
 				continue
 			}
 
@@ -226,7 +226,7 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 					totalCount++
 				}
 			default:
-				bh.Log <- "❌ Unknown kind: " + kind
+				bh.log("❌ Unknown kind: %s", kind)
 				continue
 			}
 
@@ -299,7 +299,7 @@ func (bh *BH) addWellKnownObjects(writer *BHFormatWriter, kind string, domainNam
 
 	domainSID, ok := builder.BState().DomainSIDCache.Get(domainName)
 	if !ok {
-		bh.Log <- "🫠 [yellow]Could not find domain SID for domain " + domainName + " to add well-known " + kind + "[-]"
+		bh.log("🫠 [yellow]Could not find domain SID for domain %s to add well-known %s[-]", domainName, kind)
 		domainSID = "UNKNOWN"
 	}
 
@@ -341,7 +341,7 @@ func (bh *BH) ProcessDomain(step int) {
 
 	domainWriter, err := bh.GetCurrentWriter("domains")
 	if err != nil {
-		bh.Log <- "❌ Error getting writer for domains: " + err.Error()
+		bh.log("❌ Error getting writer for domains: %v", err)
 		return
 	}
 	fileName := domainWriter.file.Name()
@@ -350,9 +350,9 @@ func (bh *BH) ProcessDomain(step int) {
 		// Log file size after writer has been closed and flushed
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(fileName); err == nil {
-				bh.Log <- fmt.Sprintf("✅ [green]Written %s (%s)[-]", fileName, formatFileSize(fileInfo.Size()))
+				bh.log("✅ [green]Written %s (%s)[-]", fileName, formatFileSize(fileInfo.Size()))
 			} else {
-				bh.Log <- fmt.Sprintf("🫠 [yellow]Problem saving %s: %v[-]", fileName, err)
+				bh.log("🫠 [yellow]Problem saving %s: %v[-]", fileName, err)
 			}
 		}
 	}()
@@ -384,14 +384,14 @@ func (bh *BH) ProcessDomain(step int) {
 
 		domainsReader, err := reader.NewMPReader(domainPath)
 		if err != nil {
-			bh.Log <- "❌ Error opening domains file: " + err.Error()
+			bh.log("❌ Error opening domains file: %v", err)
 			continue
 		}
 		defer domainsReader.Close()
 
 		totalInFile, err := domainsReader.ReadLength()
 		if err != nil {
-			bh.Log <- "❌ Error reading length of domains file: " + err.Error()
+			bh.log("❌ Error reading length of domains file: %v", err)
 			continue
 		}
 
@@ -424,7 +424,7 @@ func (bh *BH) ProcessDomain(step int) {
 
 			*originalEntry = ldap.Entry{}
 			if err := info.reader.ReadEntry(originalEntry); err != nil {
-				bh.Log <- "❌ Error decoding domain: " + err.Error()
+				bh.log("❌ Error decoding domain: %v", err)
 				continue
 			}
 
@@ -464,14 +464,14 @@ func (bh *BH) loadTrusts(trustsPath string) []gildap.LDAPEntry {
 
 	mpReader, err := reader.NewMPReader(trustsPath)
 	if err != nil {
-		bh.Log <- "❌ Error opening trusts file: " + err.Error()
+		bh.log("❌ Error opening trusts file: %v", err)
 		return trusts
 	}
 	defer mpReader.Close()
 
 	_, err = mpReader.ReadLength()
 	if err != nil {
-		bh.Log <- "❌ Error reading length of trusts file: " + err.Error()
+		bh.log("❌ Error reading length of trusts file: %v", err)
 		return trusts
 	}
 
@@ -485,7 +485,7 @@ func (bh *BH) loadTrusts(trustsPath string) []gildap.LDAPEntry {
 
 		*originalEntry = ldap.Entry{}
 		if err := mpReader.ReadEntry(originalEntry); err != nil {
-			bh.Log <- "❌ Error decoding trust: " + err.Error()
+			bh.log("❌ Error decoding trust: %v", err)
 			continue
 		}
 
@@ -509,7 +509,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 		ctWriter.Close()
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(ctFileName); err == nil {
-				bh.Log <- fmt.Sprintf("✅ [green]Written %s (%s)[-]", ctFileName, formatFileSize(fileInfo.Size()))
+				bh.log("✅ [green]Written %s (%s)[-]", ctFileName, formatFileSize(fileInfo.Size()))
 			}
 		}
 	}()
@@ -520,7 +520,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 		enterpriseCAWriter.Close()
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(enterpriseCAFileName); err == nil {
-				bh.Log <- fmt.Sprintf("✅ [green]Written %s (%s)[-]", enterpriseCAFileName, formatFileSize(fileInfo.Size()))
+				bh.log("✅ [green]Written %s (%s)[-]", enterpriseCAFileName, formatFileSize(fileInfo.Size()))
 			}
 		}
 	}()
@@ -531,7 +531,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 		aiacaWriter.Close()
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(aiacaFileName); err == nil {
-				bh.Log <- fmt.Sprintf("✅ [green]Written %s (%s)[-]", aiacaFileName, formatFileSize(fileInfo.Size()))
+				bh.log("✅ [green]Written %s (%s)[-]", aiacaFileName, formatFileSize(fileInfo.Size()))
 			}
 		}
 	}()
@@ -542,7 +542,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 		rootCAWriter.Close()
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(rootCAFileName); err == nil {
-				bh.Log <- fmt.Sprintf("✅ [green]Written %s (%s)[-]", rootCAFileName, formatFileSize(fileInfo.Size()))
+				bh.log("✅ [green]Written %s (%s)[-]", rootCAFileName, formatFileSize(fileInfo.Size()))
 			}
 		}
 	}()
@@ -553,7 +553,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 		ntAuthStoresWriter.Close()
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(ntAuthStoresFileName); err == nil {
-				bh.Log <- fmt.Sprintf("✅ [green]Written %s (%s)[-]", ntAuthStoresFileName, formatFileSize(fileInfo.Size()))
+				bh.log("✅ [green]Written %s (%s)[-]", ntAuthStoresFileName, formatFileSize(fileInfo.Size()))
 			}
 		}
 	}()
@@ -564,7 +564,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 		issuancePoliciesWriter.Close()
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(issuancePoliciesFileName); err == nil {
-				bh.Log <- fmt.Sprintf("✅ [green]Written %s (%s)[-]", issuancePoliciesFileName, formatFileSize(fileInfo.Size()))
+				bh.log("✅ [green]Written %s (%s)[-]", issuancePoliciesFileName, formatFileSize(fileInfo.Size()))
 			}
 		}
 	}()
@@ -584,14 +584,14 @@ func (bh *BH) ProcessConfiguration(step int) {
 	for _, configPath := range configPaths {
 		mpReader, err := reader.NewMPReader(configPath)
 		if err != nil {
-			bh.Log <- "❌ Error opening configuration file: " + err.Error()
+			bh.log("❌ Error opening configuration file: %v", err)
 			continue
 		}
 		defer mpReader.Close()
 
 		totalInFile, err := mpReader.ReadLength()
 		if err != nil {
-			bh.Log <- "❌ Error reading length of configuration file: " + err.Error()
+			bh.log("❌ Error reading length of configuration file: %v", err)
 			continue
 		}
 		totalInFiles += totalInFile
@@ -622,7 +622,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 
 			*originalEntry = ldap.Entry{}
 			if err := mpReader.ReadEntry(originalEntry); err != nil {
-				bh.Log <- "❌ Error decoding configuration entry: " + err.Error()
+				bh.log("❌ Error decoding configuration entry: %v", err)
 				continue
 			}
 
@@ -775,14 +775,14 @@ func (bh *BH) LoadSchemaInfo(step int) {
 	for _, schemaPath := range schemaPaths {
 		mpReader, err := reader.NewMPReader(schemaPath)
 		if err != nil {
-			bh.Log <- "❌ Error opening schema file: " + err.Error()
+			bh.log("❌ Error opening schema file: %v", err)
 			continue
 		}
 		defer mpReader.Close()
 
 		totalInFile, err := mpReader.ReadLength()
 		if err != nil {
-			bh.Log <- "❌ Error reading length of schema file: " + err.Error()
+			bh.log("❌ Error reading length of schema file: %v", err)
 			continue
 		}
 		totalInFiles += totalInFile
@@ -810,7 +810,7 @@ func (bh *BH) LoadSchemaInfo(step int) {
 
 			*originalEntry = ldap.Entry{}
 			if err := mpReader.ReadEntry(originalEntry); err != nil {
-				bh.Log <- "❌ Error decoding schema entry: " + err.Error()
+				bh.log("❌ Error decoding schema entry: %v", err)
 				continue
 			}
 
@@ -868,7 +868,7 @@ func (bh *BH) PerformConversion() {
 	notifyAbort := func(currentStep int) bool {
 		if bh.IsAborted() {
 			if !abortLogged && bh.Log != nil {
-				bh.Log <- "🛑 Conversion abort requested. Stopping remaining steps..."
+				bh.log("🛑 Conversion abort requested. Stopping remaining steps...")
 				abortLogged = true
 			}
 			// Mark remaining steps as skipped
@@ -965,7 +965,7 @@ func (bh *BH) PerformConversion() {
 	}
 
 	if builder.BState().EmptySDCount > 0 {
-		bh.Log <- fmt.Sprintf("🫠 [yellow]Security descriptors were not present in %d entries. Permissions issue during ingestion?[-]", builder.BState().EmptySDCount)
+		bh.log("🫠 [yellow]Security descriptors were not present in %d entries. Permissions issue during ingestion?[-]", builder.BState().EmptySDCount)
 	}
 }
 
@@ -1035,19 +1035,19 @@ func (bh *BH) loadConversionCache(step int) {
 		for _, filePath := range filePaths {
 			// Check if this cache has already been loaded
 			if builder.BState().IsCacheLoaded(filePath) {
-				bh.Log <- fmt.Sprintf("🦘 Skipped %s (already loaded)", filePath)
+				bh.logVerbose("🦘 Skipped %s (already loaded)", filePath)
 				continue
 			}
 
 			r, err := reader.NewMPReader(filePath)
 			if err != nil {
-				bh.Log <- fmt.Sprintf("❌ Error opening file %s: %v", filePath, err)
+				bh.log("❌ Error opening file %s: %v", filePath, err)
 				continue
 			}
 
 			numEntries, err := r.ReadLength()
 			if err != nil {
-				bh.Log <- fmt.Sprintf("❌ Error reading length of %s: %v", filePath, err)
+				bh.log("❌ Error reading length of %s: %v", filePath, err)
 				r.Close()
 				continue
 			}
@@ -1132,14 +1132,14 @@ func (bh *BH) loadConversionCache(step int) {
 		}
 
 		filePath := info.reader.GetPath()
-		bh.Log <- fmt.Sprintf("📦 Loading %s", filePath)
+		bh.logVerbose("📦 Loading %s", filePath)
 
 		builder.BState().CacheEntries(info.reader, info.identifier, bh.Log, bh.IsAborted, progressCallback)
 
 		// Mark this cache as loaded
 		builder.BState().MarkCacheLoaded(filePath)
 
-		bh.Log <- fmt.Sprintf("✅ %s loaded", filePath)
+		bh.logVerbose("✅ %s loaded", filePath)
 	}
 }
 
@@ -1158,7 +1158,7 @@ func (bh *BH) compressBloodhoundOutput(step int) {
 	}
 
 	if len(filesToCompress) == 0 {
-		bh.Log <- "🫠 [yellow]No JSON files found to compress[-]"
+		bh.log("🫠 [yellow]No JSON files found to compress[-]")
 		return
 	}
 
@@ -1166,7 +1166,7 @@ func (bh *BH) compressBloodhoundOutput(step int) {
 	zipPath := filepath.Join(bh.OutputFolder, bh.Timestamp+"_BloodHound.zip")
 	zipFile, err := os.Create(zipPath)
 	if err != nil {
-		bh.Log <- "❌ Error creating zip file: " + err.Error()
+		bh.log("❌ Error creating zip file: %v", err)
 		return
 	}
 	defer zipFile.Close()
@@ -1197,7 +1197,7 @@ func (bh *BH) compressBloodhoundOutput(step int) {
 		}
 
 		if err := bh.addFileToZip(zipWriter, file); err != nil {
-			bh.Log <- "❌ Error adding file to zip: " + err.Error()
+			bh.log("❌ Error adding file to zip: %v", err)
 			return
 		}
 
@@ -1223,25 +1223,25 @@ func (bh *BH) compressBloodhoundOutput(step int) {
 
 	// Close the zip writer before getting file size
 	if err := zipWriter.Close(); err != nil {
-		bh.Log <- "❌ Error finalizing zip: " + err.Error()
+		bh.log("❌ Error finalizing zip: %v", err)
 		return
 	}
 
 	// Get zip file size
 	if fileInfo, err := os.Stat(zipPath); err == nil {
-		bh.Log <- fmt.Sprintf("✅ [green]BloodHound dump: \"%s\" (%s)[-]", zipPath, formatFileSize(fileInfo.Size()))
+		bh.log("✅ [green]BloodHound dump: \"%s\" (%s)[-]", zipPath, formatFileSize(fileInfo.Size()))
 	} else {
-		bh.Log <- fmt.Sprintf("🫠 [yellow]Problem saving \"%s\": %v[-]", zipPath, err)
+		bh.log("🫠 [yellow]Problem saving \"%s\": %v[-]", zipPath, err)
 	}
 
 	// Cleanup original files if enabled
 	if bh.RuntimeOptions.GetCleanupAfterCompression() {
 		for _, file := range filesToCompress {
 			if err := os.Remove(file); err != nil {
-				bh.Log <- "🫠 [yellow]Could not remove \"" + filepath.Base(file) + "\":[-] " + err.Error()
+				bh.log("🫠 [yellow]Could not remove \"%s\":[-] %v", filepath.Base(file), err)
 			}
 		}
-		bh.Log <- fmt.Sprintf("🧹 Cleaned up %d original JSON files from \"%s\"", len(filesToCompress), bh.OutputFolder)
+		bh.log("🧹 Cleaned up %d original JSON files from \"%s\"", len(filesToCompress), bh.OutputFolder)
 	}
 }
 

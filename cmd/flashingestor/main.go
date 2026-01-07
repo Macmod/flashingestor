@@ -35,9 +35,12 @@ func main() {
 
 	jobManager := newJobManager()
 
-	logChannel := make(chan string)
+	logChannel := make(chan core.LogMessage)
 	logFunc := func(format string, args ...interface{}) {
-		logChannel <- fmt.Sprintf(format, args...)
+		logChannel <- core.LogMessage{Message: fmt.Sprintf(format, args...), Level: 0}
+	}
+	logVerbose := func(format string, args ...interface{}) {
+		logChannel <- core.LogMessage{Message: fmt.Sprintf(format, args...), Level: 1}
 	}
 
 	var logFile *os.File
@@ -49,7 +52,8 @@ func main() {
 		defer logFile.Close()
 	}
 
-	logger := core.NewLogger(logChannel, logFile, uiApp)
+	verboseLevel := cfg.RuntimeOptions.GetVerbose()
+	logger := core.NewLogger(logChannel, logFile, uiApp, verboseLevel)
 	go logger.Start()
 
 	logFunc("🧩 Welcome to FlashIngestor " + versionString)
@@ -113,6 +117,7 @@ func main() {
 		queryDefs:           cfg.RuntimeOptions.GetQueries(),
 		ldapFolder:          dirs.LDAP,
 		logFunc:             logFunc,
+		logVerbose:          logVerbose,
 		uiApp:               uiApp,
 		processedDomains:    &sync.Map{},
 		includeACLs:         cfg.RuntimeOptions.GetIncludeACLs(),

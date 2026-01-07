@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Macmod/flashingestor/core"
 	gildap "github.com/Macmod/flashingestor/ldap"
 	"github.com/Macmod/flashingestor/reader"
 	"github.com/go-ldap/ldap/v3"
@@ -154,7 +155,7 @@ func (st *State) MarkCacheLoaded(fileName string) {
 	st.loadedCaches[fileName] = true
 }
 
-func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log chan<- string, shouldAbort func() bool, progressCallback func(processed, total int)) error {
+func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log chan<- core.LogMessage, shouldAbort func() bool, progressCallback func(processed, total int)) error {
 	processedCount := 0
 
 	originalEntry := new(ldap.Entry)
@@ -255,11 +256,15 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 					// Calculate the implicit ACL hash
 					aclHash, err := CalculateImplicitACLHash(securityDescriptor)
 					if err != nil {
-						log <- fmt.Sprintf("❌ Error calculating AdminSDHolder ACL hash for %s: %v", domainName, err)
-					} else if aclHash != "" {
-						// Store the hash indexed by domain name
-						st.AdminSDHolderHashCache.Store(domainName, aclHash)
-						log <- fmt.Sprintf("🔒 Cached AdminSDHolder ACL hash for domain \"%s\"", domainName)
+					if log != nil {
+						log <- core.LogMessage{Message: fmt.Sprintf("❌ Error calculating AdminSDHolder ACL hash for %s: %v", domainName, err), Level: 0}
+					}
+				} else if aclHash != "" {
+					// Store the hash indexed by domain name
+					st.AdminSDHolderHashCache.Store(domainName, aclHash)
+					if log != nil {
+						log <- core.LogMessage{Message: fmt.Sprintf("🔒 Cached AdminSDHolder ACL hash for domain \"%s\"", domainName), Level: 0}
+					}
 					}
 				}
 			}

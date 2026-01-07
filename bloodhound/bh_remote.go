@@ -86,7 +86,7 @@ func (bh *BH) PerformRemoteCollection(auth *config.CredentialMgr) {
 		return
 	}
 
-	bh.Log <- fmt.Sprintf("🎯 About to perform active collection for %d computers", len(computers))
+	bh.log("🎯 About to perform active collection for %d computers", len(computers))
 	bh.runRemoteStep(4, func() { bh.collectComputerData(4, computers, collector) })
 }
 
@@ -150,19 +150,19 @@ func (bh *BH) loadRemoteCollectionCache(step int) {
 		for _, filePath := range filePaths {
 			// Check if this cache has already been loaded
 			if builder.BState().IsCacheLoaded(filePath) {
-				bh.Log <- fmt.Sprintf("🦘 Skipped %s (already loaded)", filePath)
+				bh.logVerbose("🦘 Skipped %s (already loaded)", filePath)
 				continue
 			}
 
 			r, err := reader.NewMPReader(filePath)
 			if err != nil {
-				bh.Log <- fmt.Sprintf("❌ Error opening file %s: %v", filePath, err)
+				bh.log("❌ Error opening file %s: %v", filePath, err)
 				continue
 			}
 
 			numEntries, err := r.ReadLength()
 			if err != nil {
-				bh.Log <- fmt.Sprintf("❌ Error reading length of %s: %v", filePath, err)
+				bh.log("❌ Error reading length of %s: %v", filePath, err)
 				r.Close()
 				continue
 			}
@@ -222,14 +222,14 @@ func (bh *BH) loadRemoteCollectionCache(step int) {
 		}
 
 		filePath := info.reader.GetPath()
-		bh.Log <- fmt.Sprintf("📦 Loading %s", filePath)
+		bh.logVerbose("📦 Loading %s", filePath)
 
 		builder.BState().CacheEntries(info.reader, info.identifier, bh.Log, bh.IsAborted, progressCallback)
 
 		// Mark this cache as loaded
 		builder.BState().MarkCacheLoaded(filePath)
 
-		bh.Log <- fmt.Sprintf("✅ %s loaded", filePath)
+		bh.logVerbose("✅ %s loaded", filePath)
 	}
 }
 
@@ -244,14 +244,14 @@ func (bh *BH) loadEnterpriseCATargets() []EnterpriseCACollectionTarget {
 	for _, configPath := range configPaths {
 		mpReader, err := reader.NewMPReader(configPath)
 		if err != nil {
-			bh.Log <- fmt.Sprintf("❌ Error opening configuration file: %v", err)
+			bh.log("❌ Error opening configuration file: %v", err)
 			continue
 		}
 		defer mpReader.Close()
 
 		_, err = mpReader.ReadLength()
 		if err != nil {
-			bh.Log <- fmt.Sprintf("❌ Error reading length of configuration file: %v", err)
+			bh.log("❌ Error reading length of configuration file: %v", err)
 			continue
 		}
 
@@ -265,7 +265,7 @@ func (bh *BH) loadEnterpriseCATargets() []EnterpriseCACollectionTarget {
 
 			*originalEntry = ldap.Entry{}
 			if err := mpReader.ReadEntry(originalEntry); err != nil {
-				bh.Log <- fmt.Sprintf("❌ Error decoding configuration entry: %v", err)
+				bh.log("❌ Error decoding configuration entry: %v", err)
 				continue
 			}
 
@@ -303,7 +303,7 @@ func (bh *BH) loadEnterpriseCATargets() []EnterpriseCACollectionTarget {
 
 // collectEnterpriseCAData collects data from enterprise CAs
 func (bh *BH) collectEnterpriseCAData(step int, targets []EnterpriseCACollectionTarget, collector *RemoteCollector) {
-	bh.Log <- fmt.Sprintf("🎯 About to perform active collection for %d enterprise CAs", len(targets))
+	bh.log("🎯 About to perform active collection for %d enterprise CAs", len(targets))
 
 	startTime := time.Now()
 	lastUpdateTime := startTime
@@ -392,19 +392,19 @@ func (bh *BH) collectEnterpriseCAData(step int, targets []EnterpriseCACollection
 		remoteCAFile := filepath.Join(bh.ActiveFolder, "RemoteEnterpriseCA.msgpack")
 		outFile, err := os.Create(remoteCAFile)
 		if err != nil {
-			bh.Log <- fmt.Sprintf("❌ Failed to create CA results file: %v", err)
+			bh.log("❌ Failed to create CA results file: %v", err)
 			return
 		}
 		defer outFile.Close()
 
 		encoder := msgpack.NewEncoder(outFile)
 		if err := encoder.Encode(caResults); err != nil {
-			bh.Log <- fmt.Sprintf("❌ Failed to write CA results: %v", err)
+			bh.log("❌ Failed to write CA results: %v", err)
 		} else {
 			if fileInfo, err := os.Stat(remoteCAFile); err == nil {
-				bh.Log <- fmt.Sprintf("✅ CA results saved to: %s (%s)", remoteCAFile, formatFileSize(fileInfo.Size()))
+				bh.log("✅ CA results saved to: %s (%s)", remoteCAFile, formatFileSize(fileInfo.Size()))
 			} else {
-				bh.Log <- fmt.Sprintf("🫠 [yellow]Problem saving %s: %v[-]", remoteCAFile, err)
+				bh.log("🫠 [yellow]Problem saving %s: %v[-]", remoteCAFile, err)
 			}
 		}
 	}
@@ -424,14 +424,14 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 	for _, computerPath := range computerPaths {
 		mpReader, err := reader.NewMPReader(computerPath)
 		if err != nil {
-			bh.Log <- fmt.Sprintf("❌ Error opening computers file: %v", err)
+			bh.log("❌ Error opening computers file: %v", err)
 			continue
 		}
 		defer mpReader.Close()
 
 		length, err := mpReader.ReadLength()
 		if err != nil {
-			bh.Log <- fmt.Sprintf("❌ Error reading length of computers file: %v", err)
+			bh.log("❌ Error reading length of computers file: %v", err)
 			continue
 		}
 
@@ -484,7 +484,7 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 						Domain:      job.domain,
 					}
 				} else {
-					bh.Log <- fmt.Sprintf("🫠 [yellow]Could not resolve %s: %v[-]", job.dNSHostName, err)
+					bh.logVerbose("🫠 [yellow]Could not resolve %s: %v[-]", job.dNSHostName, err)
 				}
 			}
 		}()
@@ -564,7 +564,7 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 
 			*originalEntry = ldap.Entry{}
 			if err := reader.ReadEntry(originalEntry); err != nil {
-				bh.Log <- fmt.Sprintf("❌ Error decoding computer: %v", err)
+				bh.log("❌ Error decoding computer: %v", err)
 				continue
 			}
 
@@ -615,7 +615,7 @@ func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collec
 	remoteResultsFile := filepath.Join(bh.ActiveFolder, "RemoteComputers.msgpack")
 	outFile, err := os.Create(remoteResultsFile)
 	if err != nil {
-		bh.Log <- fmt.Sprintf("❌ Failed to create results file: %v", err)
+		bh.log("❌ Failed to create results file: %v", err)
 		return
 	}
 	defer outFile.Close()
@@ -702,9 +702,9 @@ func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collec
 	// Check if aborted before finalizing
 	if bh.IsAborted() {
 		if fileInfo, err := os.Stat(remoteResultsFile); err == nil {
-			bh.Log <- fmt.Sprintf("✅ Computer results saved to: %s (%s)", remoteResultsFile, formatFileSize(fileInfo.Size()))
+			bh.log("✅ Computer results saved to: %s (%s)", remoteResultsFile, formatFileSize(fileInfo.Size()))
 		} else {
-			bh.Log <- fmt.Sprintf("🫠 [yellow]Problem saving %s: %v[-]", remoteResultsFile, err)
+			bh.log("🫠 [yellow]Problem saving %s: %v[-]", remoteResultsFile, err)
 		}
 		return
 	}
@@ -712,9 +712,9 @@ func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collec
 	// Update final status
 	bh.finalizeComputerCollection(step, len(computers), successCount, finalElapsed)
 	if fileInfo, err := os.Stat(remoteResultsFile); err == nil {
-		bh.Log <- fmt.Sprintf("✅ Computer results saved to: %s (%s)", remoteResultsFile, formatFileSize(fileInfo.Size()))
+		bh.log("✅ Computer results saved to: %s (%s)", remoteResultsFile, formatFileSize(fileInfo.Size()))
 	} else {
-		bh.Log <- fmt.Sprintf("🫠 [yellow]Problem saving %s: %v[-]", remoteResultsFile, err)
+		bh.log("🫠 [yellow]Problem saving %s: %v[-]", remoteResultsFile, err)
 	}
 }
 
@@ -772,7 +772,7 @@ func (bh *BH) processComputerResults(step int, resultChan chan struct {
 		if len(resultBuffer) >= bh.RemoteWriteBuff {
 			encoderMu.Lock()
 			if err := encoder.Encode(resultBuffer); err != nil {
-				bh.Log <- fmt.Sprintf("Failed to write results: %v", err)
+				bh.log("Failed to write results: %v", err)
 			}
 			encoderMu.Unlock()
 			resultBuffer = make(map[string]RemoteCollectionResult, bh.RemoteWriteBuff)
@@ -826,7 +826,7 @@ func (bh *BH) processComputerResults(step int, resultChan chan struct {
 	if len(resultBuffer) > 0 {
 		encoderMu.Lock()
 		if err := encoder.Encode(resultBuffer); err != nil {
-			bh.Log <- fmt.Sprintf("Failed to write final results: %v", err)
+			bh.log("Failed to write final results: %v", err)
 		}
 		encoderMu.Unlock()
 	}

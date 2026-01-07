@@ -374,35 +374,6 @@ func stripServicePrincipalName(host string) string {
 	return host
 }
 
-// encodeNetBIOSName encodes a NetBIOS name according to RFC 1001/1002
-// Each character is split into two nibbles and encoded as uppercase letters A-P
-func encodeNetBIOSName(name string) []byte {
-	// Pad name to 16 characters with spaces
-	paddedName := name
-	if len(paddedName) < 16 {
-		paddedName = paddedName + strings.Repeat(" ", 16-len(paddedName))
-	} else if len(paddedName) > 16 {
-		paddedName = paddedName[:16]
-	}
-
-	// Encode: each byte becomes two characters (nibbles + 'A')
-	encoded := make([]byte, 32)
-	for i := 0; i < 16; i++ {
-		b := paddedName[i]
-		encoded[i*2] = 'A' + (b >> 4)
-		encoded[i*2+1] = 'A' + (b & 0x0F)
-	}
-
-	// Build the full query name with length prefix
-	// Format: <length><encoded_name><0x00> where length is 32 (0x20)
-	result := make([]byte, 34)
-	result[0] = 0x20 // Length of encoded name
-	copy(result[1:33], encoded)
-	result[33] = 0x00 // Terminator
-
-	return result
-}
-
 // RequestNETBIOSNameFromComputer queries a computer's NetBIOS name via UDP port 137
 // Returns the NetBIOS name and whether the query was successful
 func RequestNETBIOSNameFromComputer(ctx context.Context, ipAddress string, timeout time.Duration) (string, bool) {
@@ -539,15 +510,18 @@ func ResolveHostname(ctx context.Context, auth *config.CredentialMgr, host strin
 	wkstaInfo, err := rpcObj.GetWkstaInfo(ctx)
 	if err == nil {
 		host = wkstaInfo.ComputerName
-		domain = wkstaInfo.LANGroup
-	}
-
-	// TODO: Original SharpHound does an extra NetBIOS query to find the name if NetrWkstaGetInfo fails
-	/*
-		if netbiosName, ok := RequestNETBIOSNameFromComputer(context.Background(), strippedHost, 2*time.Second); ok {
-			...
+		/*
+			// Commented out for now, as sometimes
+			// this does not seem to return the FQDN
+			if wkstaInfo.LANGroup != "" {
+				domain = wkstaInfo.LANGroup
+			}
+		*/
+	} else {
+		if netbiosName, ok := RequestNETBIOSNameFromComputer(ctx, host, config.NETBIOS_TIMEOUT); ok && netbiosName != "" {
+			host = netbiosName
 		}
-	*/
+	}
 
 	return ResolveHostnameInCaches(host, domain)
 }

@@ -8,32 +8,45 @@ import (
 	"github.com/Macmod/flashingestor/ui"
 )
 
+// LogMessage represents a log entry with level
+type LogMessage struct {
+	Message string
+	Level   int // 0 = normal, 1 = verbose
+}
+
 // Logger handles message logging to both UI and file.
 type Logger struct {
-	channel chan string
-	file    *os.File
-	uiApp   *ui.Application
+	channel      chan LogMessage
+	file         *os.File
+	uiApp        *ui.Application
+	verboseLevel int
 }
 
 // NewLogger creates a new logger instance.
-func NewLogger(channel chan string, file *os.File, uiApp *ui.Application) *Logger {
+func NewLogger(channel chan LogMessage, file *os.File, uiApp *ui.Application, verboseLevel int) *Logger {
 	return &Logger{
-		channel: channel,
-		file:    file,
-		uiApp:   uiApp,
+		channel:      channel,
+		file:         file,
+		uiApp:        uiApp,
+		verboseLevel: verboseLevel,
 	}
 }
 
 // Start begins processing log messages.
 func (l *Logger) Start() {
-	for msg := range l.channel {
+	for logMsg := range l.channel {
+		// Skip verbose messages if verbose level is too low
+		if logMsg.Level > l.verboseLevel {
+			continue
+		}
+
 		// Always update UI
-		l.uiApp.UpdateLog(msg)
+		l.uiApp.UpdateLog(logMsg.Message)
 
 		// Write to log file if specified
 		if l.file != nil {
 			timestamp := time.Now().Format("2006-01-02 15:04:05")
-			fmt.Fprintf(l.file, "[%s] %s\n", timestamp, msg)
+			fmt.Fprintf(l.file, "[%s] %s\n", timestamp, logMsg.Message)
 		}
 	}
 }
