@@ -54,7 +54,18 @@ func (bo *BaseADObject) FromEntry(entry *gildap.LDAPEntry, entryType string) {
 
 	bo.IsDeleted = entry.GetAttrVal("isDeleted", "") == "TRUE"
 
-	if parentEntry, exists := BState().MemberCache.Get(entry.GetParentDN()); exists {
+	parentDN := entry.GetParentDN()
+	if strings.HasPrefix(parentDN, "CN=Builtin,") {
+		// Special handling for objects that are under the
+		// Builtin container
+		domainSID, ok := BState().DomainSIDCache.Get(entryDomain)
+		if ok && domainSID != "" {
+			bo.ContainedBy = &TypedPrincipal{
+				ObjectIdentifier: domainSID,
+				ObjectType:       "Domain",
+			}
+		}
+	} else if parentEntry, exists := BState().MemberCache.Get(parentDN); exists {
 		resolvedObj := parentEntry.ToTypedPrincipal()
 		bo.ContainedBy = &resolvedObj
 	}
