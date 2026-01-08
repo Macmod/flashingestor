@@ -3,6 +3,8 @@ package bloodhound
 import (
 	"context"
 	"fmt"
+	"net"
+	"strings"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
 	"github.com/Macmod/flashingestor/msrpc"
@@ -31,15 +33,58 @@ func (rc *RemoteCollector) collectSessions(ctx context.Context, targetHost strin
 	}
 
 	for _, session := range sessions {
-		// TODO: Review against:
-		// https://github.com/SpecterOps/SharpHoundCommon/blob/1968f8d108be22e52906dd3cd15ddd62cf0544ba/src/CommonLib/Processors/ComputerSessionProcessor.cs#L54
+		userName := session.UserName
+		computerSessionName := session.ClientName
+		if computerSessionName == "" || userName == "" {
+			continue
+		}
+
+		currentUser := rc.auth.Creds().Username
+		if strings.HasSuffix(userName, "$") || strings.EqualFold(userName, "ANONYMOUS LOGON") || strings.EqualFold(userName, currentUser) {
+			continue
+		}
+
+		if targetDomain == "." {
+			continue
+		}
+
+		// Client computer name / IP
+		var resolvedComputerSID string
+		computerSessionName = strings.TrimPrefix(computerSessionName, "\\\\")
+
+		if computerSessionName == "[::1]" || computerSessionName == "127.0.0.1" {
+			resolvedComputerSID = computerSid
+		} else {
+			if net.ParseIP(computerSessionName) != nil {
+				resolver := rc.auth.Resolver()
+
+				// Fall back to DNS reverse lookup
+				addrs, err := resolver.LookupAddr(ctx, computerSessionName)
+				if err == nil && len(addrs) > 0 {
+					// Use the first resolved hostname
+					computerSessionName = strings.TrimSuffix(addrs[0], ".")
+				}
+			}
+
+			realComputerSid, ok := builder.ResolveHostname(ctx, rc.auth, computerSessionName, targetDomain)
+			if ok {
+				resolvedComputerSID = realComputerSid
+			}
+		}
+
+		if resolvedComputerSID == "" || !strings.HasPrefix(resolvedComputerSID, "S-1") {
+			continue
+		}
+
+		// Lookup user SID from SAM cache
+		// Original SharpHound queries the GC first, but we skip that for now
 		userObj, ok := builder.BState().SamCache.Get(targetDomain + "+" + session.UserName)
 		if !ok {
 			continue
 		}
 
 		result.Results = append(result.Results, builder.Session{
-			ComputerSID: computerSid,
+			ComputerSID: resolvedComputerSID,
 			UserSID:     userObj.ObjectIdentifier,
 		})
 	}

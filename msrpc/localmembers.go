@@ -45,7 +45,6 @@ func (m *SamrRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 			Name:   domain.Name,
 		})
 		if err != nil {
-			//return nil, fmt.Errorf("LookupDomainInSAMServer failed: %w", err)
 			continue
 		}
 
@@ -55,13 +54,11 @@ func (m *SamrRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 			DesiredAccess: 0x00000200 | dtyp.AccessMaskMaximumAllowed,
 		})
 		if err != nil {
-			//return nil, fmt.Errorf("SamrOpenDomain failed: %w", err)
 			continue
 		}
 
 		aliases, err := m.enumerateAliasesInDomain(domainResp.Domain)
 		if err != nil {
-			//return nil, fmt.Errorf("EnumerateAliasesInDomain failed: %w", err)
 			continue
 		}
 
@@ -74,7 +71,6 @@ func (m *SamrRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 				AliasID:       alias.RelativeID,
 			})
 			if err != nil {
-				//return nil, fmt.Errorf("SamrOpenAlias failed: %w", err)
 				continue
 			}
 
@@ -82,7 +78,6 @@ func (m *SamrRPC) GetLocalGroupMembers(isDC bool) ([]GroupAlias, error) {
 				AliasHandle: aliasResp.AliasHandle,
 			})
 			if err != nil || membersResp == nil || membersResp.Members == nil {
-				//return nil, fmt.Errorf("SamrGetMembersInAlias failed: %w", err)
 				continue
 			}
 
@@ -109,8 +104,9 @@ func (m *SamrRPC) enumerateDomainsInSAMServer(handle *samr.Handle) ([]*samr.RIDE
 
 	for enum := uint32(0); ; {
 		resp, err := m.Client.EnumerateDomainsInSAMServer(m.Context, &samr.EnumerateDomainsInSAMServerRequest{
-			Server:             handle,
-			EnumerationContext: enum,
+			Server:                 handle,
+			EnumerationContext:     enum,
+			PreferredMaximumLength: 0xFFFFFFFF,
 		})
 		if err != nil {
 			if !errors.Is(err, ntstatus.StatusMoreEntries) {
@@ -134,8 +130,9 @@ func (m *SamrRPC) enumerateAliasesInDomain(handle *samr.Handle) ([]*samr.RIDEnum
 
 	for enum := uint32(0); ; {
 		resp, err := m.Client.EnumerateAliasesInDomain(m.Context, &samr.EnumerateAliasesInDomainRequest{
-			Domain:             handle,
-			EnumerationContext: enum,
+			Domain:                 handle,
+			EnumerationContext:     enum,
+			PreferredMaximumLength: 0xFFFFFFFF,
 		})
 		if err != nil {
 			if !errors.Is(err, ntstatus.StatusMoreEntries) {

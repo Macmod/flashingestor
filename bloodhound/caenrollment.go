@@ -140,7 +140,6 @@ func (p *CAEnrollmentProcessor) getNtlmEndpoint(
 	}
 
 	// Get credentials from auth options
-	// TODO: Review what happens when using ntlm hash / kerberos?
 	username := p.auth.Creds().Username
 	password := p.auth.Creds().Password
 	if username == "" || password == "" {

@@ -9,29 +9,39 @@ import (
 	"github.com/oiweiwei/go-msrpc/msrpc/samr/samr/v1"
 )
 
-func (m *SamrRPC) GetMachineSid(handle *samr.Handle, testName *string) (*dtyp.SID, error) {
+func (m *SamrRPC) GetMachineSid(testName string) (*dtyp.SID, error) {
+	if testName == "" {
+		return nil, fmt.Errorf("testName cannot be empty")
+	}
+
 	var sid *dtyp.SID
-	if testName == nil {
-		return nil, fmt.Errorf("testName cannot be nil")
+
+	resp, err := m.Client.Connect(m.Context, &samr.ConnectRequest{
+		// TODO: Review whether this is the proper mask
+		DesiredAccess: dtyp.AccessMaskGenericRead | dtyp.AccessMaskGenericExecute,
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	result, err := m.Client.LookupDomainInSAMServer(m.Context, &samr.LookupDomainInSAMServerRequest{
-		Server: handle,
-		Name:   &dtyp.UnicodeString{Buffer: *testName},
+		Server: resp.Server,
+		Name:   &dtyp.UnicodeString{Buffer: testName},
 	})
 
 	if err == nil {
 		sid = result.DomainID
 	} else {
-		domains, err := m.enumerateDomainsInSAMServer(handle)
+		domains, err := m.enumerateDomainsInSAMServer(resp.Server)
 		if err != nil {
 			return nil, fmt.Errorf("error running EnumerateDomainsInSAMServer: %w", err)
 		}
 
 		if len(domains) > 0 {
+			// Shouldn't wee look for the first that isn't "Builtin"?
 			targetDomain := domains[0]
 			result, err := m.Client.LookupDomainInSAMServer(m.Context, &samr.LookupDomainInSAMServerRequest{
-				Server: handle,
+				Server: resp.Server,
 				Name:   &dtyp.UnicodeString{Buffer: targetDomain.Name.Buffer},
 			})
 
@@ -59,7 +69,7 @@ func (m *LsatRPC) LookupSids(sids []string) ([]ResolvedSID, error) {
 	resolvedSid := make([]ResolvedSID, 0)
 
 	lsaConResp, err := m.Client.OpenPolicy2(m.Context, &lsat.OpenPolicy2Request{
-		// Check mask
+		// TODO: Recheck mask
 		DesiredAccess: dtyp.AccessMaskGenericRead | dtyp.AccessMaskGenericExecute | dtyp.AccessMaskAccessSystemSecurity,
 	})
 

@@ -34,25 +34,27 @@ func (rcr *RemoteCollectionResult) StoreInComputer(computer *builder.Computer) {
 	computer.PrivilegedSessions = rcr.PrivilegedSessions
 	computer.Sessions = rcr.Sessions
 	computer.RegistrySessions = rcr.RegistrySessions
-	computer.DCRegistryData = rcr.DCRegistryData
 	computer.NTLMRegistryData = rcr.NTLMRegistryData
 	computer.UserRights = rcr.UserRights
 	computer.IsWebClientRunning = rcr.IsWebClientRunning
 
-	// Store LDAP services in Properties
-	if rcr.LdapServices.HasLdap {
-		hasLdap := true
-		computer.Properties.LdapAvailable = &hasLdap
-	}
-	if rcr.LdapServices.HasLdaps {
-		hasLdaps := true
-		computer.Properties.LdapsAvailable = &hasLdaps
-	}
-	if rcr.LdapServices.IsChannelBindingRequired.Collected {
-		computer.Properties.LdapsEpa = rcr.LdapServices.IsChannelBindingRequired.Result
-	}
-	if rcr.LdapServices.IsSigningRequired.Collected {
-		computer.Properties.LdapSigning = rcr.LdapServices.IsSigningRequired.Result
+	if computer.IsDC {
+		computer.DCRegistryData = rcr.DCRegistryData
+
+		if rcr.LdapServices.HasLdap {
+			hasLdap := true
+			computer.Properties.LdapAvailable = &hasLdap
+		}
+		if rcr.LdapServices.HasLdaps {
+			hasLdaps := true
+			computer.Properties.LdapsAvailable = &hasLdaps
+		}
+		if rcr.LdapServices.IsChannelBindingRequired.Collected {
+			computer.Properties.LdapsEpa = rcr.LdapServices.IsChannelBindingRequired.Result
+		}
+		if rcr.LdapServices.IsSigningRequired.Collected {
+			computer.Properties.LdapSigning = rcr.LdapServices.IsSigningRequired.Result
+		}
 	}
 }
 

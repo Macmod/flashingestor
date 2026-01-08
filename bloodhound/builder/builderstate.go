@@ -33,6 +33,7 @@ type State struct {
 	SIDCache               *StringCache
 	HostDnsCache           *StringCache
 	SamCache               *StringCache
+	MachineSIDCache        *StringCache
 	ChildCache             *ParentChildCache
 	AdminSDHolderHashCache sync.Map // Thread-safe map[string]string
 	CertTemplateCache      *StringCache
@@ -125,6 +126,10 @@ func (st *State) Init(forestMapPath string) {
 		st.SamCache = NewCache(ShardNumStandard)
 	}
 
+	if st.MachineSIDCache == nil {
+		st.MachineSIDCache = NewCache(ShardNumStandard)
+	}
+
 	if st.ChildCache == nil {
 		st.ChildCache = NewParentChildCache(ShardNumStandard)
 	}
@@ -209,6 +214,8 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 		st.MemberCache.Set(entry.DN, &cacheEntry)
 		st.SIDCache.Set(entry.GetSID(), &cacheEntry)
 
+		sAMAccountName := entry.GetAttrVal("sAMAccountName", "")
+
 		if identifier == "computers" {
 			dnsHostname := entry.GetAttrVal("dNSHostName", "")
 			if dnsHostname != "" {
@@ -229,6 +236,10 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 					})
 					st.domainControllersMu.Unlock()
 				}
+			}
+
+			if sAMAccountName != "" {
+				st.SamCache.Set(inferNetBIOSName(domainName)+"+"+sAMAccountName, &cacheEntry)
 			}
 		} else if identifier == "domains" {
 			domainSID := entry.GetSID()
@@ -256,15 +267,15 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 					// Calculate the implicit ACL hash
 					aclHash, err := CalculateImplicitACLHash(securityDescriptor)
 					if err != nil {
-					if log != nil {
-						log <- core.LogMessage{Message: fmt.Sprintf("❌ Error calculating AdminSDHolder ACL hash for %s: %v", domainName, err), Level: 0}
-					}
-				} else if aclHash != "" {
-					// Store the hash indexed by domain name
-					st.AdminSDHolderHashCache.Store(domainName, aclHash)
-					if log != nil {
-						log <- core.LogMessage{Message: fmt.Sprintf("🔒 Cached AdminSDHolder ACL hash for domain \"%s\"", domainName), Level: 0}
-					}
+						if log != nil {
+							log <- core.LogMessage{Message: fmt.Sprintf("❌ Error calculating AdminSDHolder ACL hash for %s: %v", domainName, err), Level: 0}
+						}
+					} else if aclHash != "" {
+						// Store the hash indexed by domain name
+						st.AdminSDHolderHashCache.Store(domainName, aclHash)
+						if log != nil {
+							log <- core.LogMessage{Message: fmt.Sprintf("🔒 Cached AdminSDHolder ACL hash for domain \"%s\"", domainName), Level: 0}
+						}
 					}
 				}
 			}
@@ -287,7 +298,6 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 			}
 		}
 
-		sAMAccountName := entry.GetAttrVal("sAMAccountName", "")
 		if sAMAccountName != "" {
 			st.SamCache.Set(domainName+"+"+sAMAccountName, &cacheEntry)
 		}
@@ -312,6 +322,7 @@ func (st *State) Clear() {
 	st.SIDCache = NewCache(ShardNumStandard)
 	st.HostDnsCache = NewCache(ShardNumStandard)
 	st.SamCache = NewCache(ShardNumStandard)
+	st.MachineSIDCache = NewCache(ShardNumStandard)
 	st.ChildCache = NewParentChildCache(ShardNumStandard)
 	st.CertTemplateCache = NewCache(ShardNumSmall)
 	st.GPOCache = NewGPOCache()

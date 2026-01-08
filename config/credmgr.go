@@ -51,6 +51,16 @@ func (a *CredentialMgr) Dialer(timeout time.Duration) *net.Dialer {
 	return dialer
 }
 
+func (a *CredentialMgr) Resolver() *net.Resolver {
+	if a.credential != nil && a.credential.Resolver != nil {
+		if resolver, ok := a.credential.Resolver.(*net.Resolver); ok {
+			return resolver
+		}
+	}
+
+	return nil
+}
+
 func (a *CredentialMgr) NewTarget(protocol string, targetHost string) *adauth.Target {
 	t := adauth.NewTarget(protocol, targetHost)
 	t.Resolver = a.credential.Resolver

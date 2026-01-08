@@ -487,41 +487,63 @@ func ResolveSpn(host string, domain string) (string, bool) {
 	return ResolveHostnameInCaches(strippedHost, domain)
 }
 
-// Original function kept for completeness
-func ResolveHostname(ctx context.Context, auth *config.CredentialMgr, host string, domain string) (string, bool) {
-	/*
-		// Removed reverse DNS as it should never happen
-		// for an object to have an IP address as its dNSHostName
-		if net.ParseIP(host) != nil {
-			// Fall back to DNS reverse lookup
-			addrs, err := net.LookupAddr(host)
-			if err == nil && len(addrs) > 0 {
-				// Use the first resolved hostname
-				host = strings.TrimSuffix(addrs[0], ".")
-			}
+func inferNetBIOSName(domain string) string {
+	parts := strings.Split(domain, ".")
+	if len(parts) > 0 {
+		firstPart := strings.ToUpper(parts[0])
+		if len(firstPart) <= 15 {
+			return firstPart
 		}
-	*/
+		return firstPart[:15]
+	}
 
+	return ""
+}
+
+// ResolveHostname resolves a hostname to a computer SID using RPC queries, NetBIOS and caches
+func ResolveHostname(ctx context.Context, auth *config.CredentialMgr, host string, domain string) (string, bool) {
 	rpcObj, err := msrpc.NewWkssvcRPC(ctx, host, auth)
 	if err == nil {
 		defer rpcObj.Close()
-	}
 
-	wkstaInfo, err := rpcObj.GetWkstaInfo(ctx)
-	if err == nil {
-		host = wkstaInfo.ComputerName
-		/*
-			// Commented out for now, as sometimes
-			// this does not seem to return the FQDN
+		wkstaInfo, err := rpcObj.GetWkstaInfo(ctx)
+		if err == nil {
 			if wkstaInfo.LANGroup != "" {
+				// Sometimes FQDN, sometimes NetBIOS?
+				// Review this behavior later
 				domain = wkstaInfo.LANGroup
 			}
-		*/
-	} else {
-		if netbiosName, ok := RequestNETBIOSNameFromComputer(ctx, host, config.NETBIOS_TIMEOUT); ok && netbiosName != "" {
-			host = netbiosName
+			return ResolveHostnameInCaches(wkstaInfo.ComputerName, domain)
 		}
 	}
 
+	if netbiosName, ok := RequestNETBIOSNameFromComputer(ctx, host, config.NETBIOS_TIMEOUT); ok && netbiosName != "" {
+		host = netbiosName
+	}
+
 	return ResolveHostnameInCaches(host, domain)
+}
+
+func GetMachineSID(ctx context.Context, auth *config.CredentialMgr, computerName string, computerObjectId string) (string, error) {
+	if machineSid, ok := BState().MachineSIDCache.Get(computerObjectId); ok {
+		return machineSid.ObjectIdentifier, nil
+	}
+
+	rpcObj, err := msrpc.NewSamrRPC(ctx, computerName, auth)
+	if err != nil {
+		return "", err
+	}
+	defer rpcObj.Close()
+
+	machineSid, err := rpcObj.GetMachineSid(computerName)
+	if err != nil {
+		return "", err
+	}
+
+	BState().MachineSIDCache.Set(computerObjectId, &Entry{
+		ObjectIdentifier: machineSid.String(),
+		ObjectTypeRaw:    ComputerObjectType,
+	})
+
+	return machineSid.String(), nil
 }

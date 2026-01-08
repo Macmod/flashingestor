@@ -14,7 +14,6 @@ import (
 	"github.com/TheManticoreProject/winacl/ace/acetype"
 	"github.com/TheManticoreProject/winacl/securitydescriptor"
 	"github.com/TheManticoreProject/winacl/sid"
-	"github.com/oiweiwei/go-msrpc/msrpc/samr/samr/v1"
 )
 
 // CertAbuseProcessor collects and processes certificate authority security data,
@@ -67,7 +66,7 @@ func (cap *CertAbuseProcessor) ProcessRegistryEnrollmentPermissions(
 	}
 
 	isDomainController := cap.isDomainController(computerObjectId)
-	machineSid := cap.getMachineSid(ctx, computerName, computerObjectId)
+	machineSid, _ := builder.GetMachineSID(ctx, cap.auth, computerName, computerObjectId)
 
 	var aces []builder.ACE
 
@@ -188,7 +187,7 @@ func (cap *CertAbuseProcessor) ProcessEAPermissions(
 	}
 
 	isDomainController := cap.isDomainController(computerObjectId)
-	machineSid := cap.getMachineSid(ctx, computerName, computerObjectId)
+	machineSid, _ := builder.GetMachineSID(ctx, cap.auth, computerName, computerObjectId)
 
 	// Parse security descriptor using winacl
 	sd := &securitydescriptor.NtSecurityDescriptor{}
@@ -369,37 +368,7 @@ func (cap *CertAbuseProcessor) getRegistryPrincipal(
 	return builder.ResolveSIDFromCache(sidStr)
 }
 
-// getMachineSid retrieves the machine SID for a computer
-func (cap *CertAbuseProcessor) getMachineSid(ctx context.Context, computerName string, computerObjectId string) string {
-	// TODO: Check a cache first using computerObjectId
-
-	rpcObj, err := msrpc.NewSamrRPC(ctx, computerName, cap.auth)
-	defer rpcObj.Close()
-	if err != nil {
-		//fmt.Fprintf(os.Stderr, "err: %v\n", err)
-		return ""
-	}
-
-	resp, err := rpcObj.Client.Connect(ctx, &samr.ConnectRequest{
-		ServerName:    string(computerName),
-		DesiredAccess: 0x01 | 0x10 | 0x20,
-	})
-	if err != nil {
-		//fmt.Fprintf(os.Stderr, "err: %v\n", err)
-		return ""
-	}
-
-	machineSid, err := rpcObj.GetMachineSid(resp.Server, &computerName)
-	if err != nil {
-		//fmt.Fprintf(os.Stderr, "err: %v\n", err)
-		return ""
-	}
-
-	// TODO: Cache the machine SID
-
-	return machineSid.String()
-}
-
+// isDomainController checks if the given computer object ID is a domain controller
 func (cap *CertAbuseProcessor) isDomainController(computerObjectId string) bool {
 	// Iterate over all domains' domain controllers
 	for _, dcList := range builder.BState().DomainControllers {

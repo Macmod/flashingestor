@@ -183,18 +183,18 @@ func (c *StringCache) shardFor(h uint64) *shard {
 	return &c.shards[h&c.mask]
 }
 
-// Set stores or updates an entry keyed by DN.
-func (c *StringCache) Set(dn string, e *Entry) {
-	h := GetHash(dn)
+// Set stores or updates an entry keyed by a key.
+func (c *StringCache) Set(key string, e *Entry) {
+	h := GetHash(key)
 	s := c.shardFor(h)
 	s.mu.Lock()
 	s.m[h] = *e
 	s.mu.Unlock()
 }
 
-// Get retrieves an entry by DN. Returns (Entry, true) if found.
-func (c *StringCache) Get(dn string) (Entry, bool) {
-	h := GetHash(dn)
+// Get retrieves an entry by a key. Returns (Entry, true) if found.
+func (c *StringCache) Get(key string) (Entry, bool) {
+	h := GetHash(key)
 	s := c.shardFor(h)
 	s.mu.RLock()
 	e, ok := s.m[h]
@@ -202,7 +202,7 @@ func (c *StringCache) Get(dn string) (Entry, bool) {
 	return e, ok
 }
 
-// Delete removes an entry by DN if present.
+// Delete removes an entry by a key if present.
 func (c *StringCache) Delete(dn string) {
 	h := GetHash(dn)
 	s := c.shardFor(h)
@@ -223,7 +223,7 @@ func (c *StringCache) Size() int {
 	return total
 }
 
-// SimpleCache is a simple thread-safe cache for domain name to SID mappings.
+// SimpleCache is a simple thread-safe cache for key<->value mappings.
 type SimpleCache struct {
 	mu sync.RWMutex
 	m  map[string]string
@@ -236,17 +236,17 @@ func NewSimpleCache() *SimpleCache {
 	}
 }
 
-// Set stores or updates a domain SID mapping.
-func (c *SimpleCache) Set(domainName string, sid string) {
+// Set stores or updates a key.
+func (c *SimpleCache) Set(key string, sid string) {
 	c.mu.Lock()
-	c.m[strings.ToUpper(domainName)] = sid
+	c.m[strings.ToUpper(key)] = sid
 	c.mu.Unlock()
 }
 
-// Get retrieves a SID by domain name. Returns (sid, true) if found.
-func (c *SimpleCache) Get(domainName string) (string, bool) {
+// Get retrieves a value by key. Returns (value, true) if found.
+func (c *SimpleCache) Get(key string) (string, bool) {
 	c.mu.RLock()
-	sid, ok := c.m[strings.ToUpper(domainName)]
+	sid, ok := c.m[strings.ToUpper(key)]
 	c.mu.RUnlock()
 	return sid, ok
 }

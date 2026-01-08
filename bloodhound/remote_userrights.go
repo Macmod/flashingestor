@@ -17,7 +17,7 @@ func GetRID(sid string) string {
 }
 
 // collectUserRights retrieves user rights assignments from a target system via LSA RPC
-func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp string, targetHost string, machineSid string, isDC bool, domain string) []builder.UserRightsAPIResult {
+func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp string, targetHost string, computerObjectId string, isDC bool, domain string) []builder.UserRightsAPIResult {
 	rpcObj, err := msrpc.NewLsadRPC(ctx, targetIp, rc.auth)
 
 	if err != nil {
@@ -42,6 +42,8 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 		}
 		return []builder.UserRightsAPIResult{result}
 	}
+
+	machineSid, _ := builder.GetMachineSID(ctx, rc.auth, targetIp, computerObjectId)
 
 	results := []builder.UserRightsAPIResult{}
 
@@ -84,14 +86,14 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 					}
 
 					result.Results = append(result.Results, builder.TypedPrincipal{
-						ObjectIdentifier: machineSid + "-" + GetRID(principalSid),
+						ObjectIdentifier: computerObjectId + "-" + GetRID(principalSid),
 						ObjectType:       objectType,
 					})
 				}
 				continue
 			}
 
-			if strings.HasPrefix(principalSid, machineSid+"-") {
+			if machineSid != "" && strings.HasPrefix(principalSid, machineSid+"-") {
 				newSid := fmt.Sprintf("%s-%s", machineSid, GetRID(principalSid))
 
 				// Need LsatRPC for SID lookup
