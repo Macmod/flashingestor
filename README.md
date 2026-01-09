@@ -1,9 +1,17 @@
 <p align="center">
   <h1 align="center"><b>flashingestor</b></h1>
   <p align="center"><i>A TUI for Active Directory collection.</i></p>
+  <p align="center">
+    <img src="https://img.shields.io/github/v/release/Macmod/flashingestor" alt="GitHub Release">
+    <img src="https://img.shields.io/github/go-mod/go-version/Macmod/flashingestor" alt="Go Version">
+    <img src="https://img.shields.io/github/languages/code-size/Macmod/flashingestor" alt="Code Size">
+    <img src="https://img.shields.io/github/license/Macmod/flashingestor" alt="License">
+    <img src="https://img.shields.io/github/actions/workflow/status/Macmod/flashingestor/release.yml" alt="Build Status">
+    <a href="https://goreportcard.com/report/github.com/Macmod/flashingestor"><img src="https://goreportcard.com/badge/github.com/Macmod/flashingestor" alt="Go Report Card"></a>
+    <img src="https://img.shields.io/github/downloads/Macmod/flashingestor/total" alt="GitHub Downloads">
+    <a href="https://twitter.com/MacmodSec"><img alt="Twitter Follow" src="https://img.shields.io/twitter/follow/MacmodSec?style=for-the-badge&logo=X&color=blue"></a>
+  </p>
 </p>
-
-![GitHub Release](https://img.shields.io/github/v/release/Macmod/flashingestor) ![](https://img.shields.io/github/go-mod/go-version/Macmod/flashingestor) ![](https://img.shields.io/github/languages/code-size/Macmod/flashingestor) ![](https://img.shields.io/github/license/Macmod/flashingestor) ![](https://img.shields.io/github/actions/workflow/status/Macmod/flashingestor/release.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/Macmod/flashingestor)](https://goreportcard.com/report/github.com/Macmod/flashingestor) ![GitHub Downloads](https://img.shields.io/github/downloads/Macmod/flashingestor/total) [<img alt="Twitter Follow" src="https://img.shields.io/twitter/follow/MacmodSec?style=for-the-badge&logo=X&color=blue">](https://twitter.com/MacmodSec)
 
 # Philosophy
 

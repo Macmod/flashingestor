@@ -5,7 +5,6 @@ package config
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"time"
 
@@ -91,7 +90,7 @@ func (d *DialerWithResolver) Dial(network, addr string) (net.Conn, error) {
 func ParseFlags() (*Config, error) {
 	var err error
 	var showVersion bool
-	
+
 	config := &Config{
 		LdapAuthOptions: &ldapauth.Options{},
 	}
@@ -134,7 +133,7 @@ func ParseFlags() (*Config, error) {
 	if config.CustomDns != "" {
 		resolver, err = setupDNSResolver(config.CustomDns, config.DnsTcp)
 		if err != nil {
-			log.Fatalf("[ERROR] %v", err)
+			return nil, fmt.Errorf("failed to setup DNS resolver: %w", err)
 		}
 	}
 	config.Resolver = resolver
