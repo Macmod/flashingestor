@@ -23,6 +23,7 @@ var ACEGuids = map[string]string{
 	"GetChangesAll":              "1131f6ad-9c07-11d1-f79f-00c04fc2dcd2",
 	"GetChangesInFilteredSet":    "89e95b76-444d-4c62-991a-0facbeda640c",
 	"WriteMember":                "bf9679c0-0de6-11d0-a285-00aa003049e2",
+	"MembershipPropertySet":      "bc0ac240-79a9-11d0-9020-00c04fc2d4cf",
 	"UserForceChangePassword":    "00299570-246d-11d0-a768-00aa006e0529",
 	"AllowedToAct":               "3f78c3e5-f79a-46bd-a0b8-9d18116ddc79",
 	"AddKeyPrincipal":            "5b47d60f-6090-40b2-9f37-2a4de88f3063",
@@ -302,7 +303,7 @@ func ParseBinaryACL(entryType string, entryDomain string, hasLAPS bool, aclData 
 		if mask&ADRightSelf == ADRightSelf &&
 			mask&ADRightWriteProperty != ADRightWriteProperty &&
 			mask&ADRightGenericWrite != ADRightGenericWrite &&
-			entryType == "group" && (objTypeGUID == ACEGuids["WriteMember"] || objTypeGUID == ACEGuids["AllGuid"]) {
+			entryType == "group" && (objTypeGUID == ACEGuids["WriteMember"] || objTypeGUID == ACEGuids["AllGuid"] || objTypeGUID == ACEGuids["MembershipPropertySet"]) {
 			// Self add (ADS_RIGHT_DS_SELF)
 			ACEs = append(ACEs, newACE("AddSelf", sidStr, isInherited, inheritanceHash, isPermissionForOwnerRightsSid, isInheritedPermissionForOwnerRightsSid))
 		}
@@ -377,7 +378,7 @@ func ParseBinaryACL(entryType string, entryDomain string, hasLAPS bool, aclData 
 			if (entryType == "ou" || entryType == "domain") && objTypeGUID == ACEGuids["WriteGPLink"] {
 				ACEs = append(ACEs, newACE("WriteGPLink", sidStr, isInherited, inheritanceHash, isPermissionForOwnerRightsSid, isInheritedPermissionForOwnerRightsSid))
 			}
-			if entryType == "group" && objTypeGUID == ACEGuids["WriteMember"] {
+			if entryType == "group" && (objTypeGUID == ACEGuids["WriteMember"] || objTypeGUID == ACEGuids["MembershipPropertySet"]) {
 				ACEs = append(ACEs, newACE("AddMember", sidStr, isInherited, inheritanceHash, isPermissionForOwnerRightsSid, isInheritedPermissionForOwnerRightsSid))
 			}
 			if (entryType == "user" || entryType == "computer") && objTypeGUID == ACEGuids["AddKeyPrincipal"] {
