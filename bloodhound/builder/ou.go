@@ -56,7 +56,7 @@ func BuildOUFromEntry(entry *gildap.LDAPEntry) (*OrganizationalUnit, bool) {
 
 	// --- GPO Links ---
 	gplinkStr := entry.GetAttrVal("gPLink", "")
-	gplinks := ParseGPLinkString(gplinkStr)
+	gplinks := parseGPLinkString(gplinkStr)
 
 	for _, link := range gplinks {
 		option := link.Option

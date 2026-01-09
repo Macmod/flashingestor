@@ -62,7 +62,7 @@ func (rc *RemoteCollector) collectHttpEnrollmentEndpoints(ctx context.Context, c
 func (rc *RemoteCollector) CollectRemoteEnterpriseCA(ctx context.Context, target EnterpriseCACollectionTarget) EnterpriseCARemoteCollectionResult {
 	result := EnterpriseCARemoteCollectionResult{}
 
-	objectSid, ok := builder.ResolveHostname(ctx, rc.auth, target.DNSHostName, target.Domain)
+	objectSid, ok := resolveHostname(ctx, rc.auth, target.DNSHostName, target.Domain)
 	if ok {
 		result.HostingComputer = objectSid
 	}
@@ -86,7 +86,7 @@ func (rc *RemoteCollector) CollectRemoteEnterpriseCA(ctx context.Context, target
 	return result
 }
 
-func MergeRemoteEnterpriseCACollection(enterpriseCa *builder.EnterpriseCA, rc *EnterpriseCARemoteCollectionResult) {
+func mergeRemoteEnterpriseCACollection(enterpriseCa *builder.EnterpriseCA, rc *EnterpriseCARemoteCollectionResult) {
 	enterpriseCa.CARegistryData = rc.CARegistryData
 	enterpriseCa.HttpEnrollmentEndpoints = rc.HttpEnrollmentEndpoints
 	enterpriseCa.HostingComputer = rc.HostingComputer

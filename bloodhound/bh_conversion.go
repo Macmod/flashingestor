@@ -679,7 +679,7 @@ func (bh *BH) processConfigurationEntry(entry *gildap.LDAPEntry) {
 			// if present
 			if bh.RuntimeOptions.GetMergeRemote() && bh.RemoteEnterpriseCACollection != nil {
 				if remoteData, found := bh.RemoteEnterpriseCACollection[enterpriseCA.ObjectIdentifier]; found {
-					MergeRemoteEnterpriseCACollection(enterpriseCA, remoteData)
+					mergeRemoteEnterpriseCACollection(enterpriseCA, remoteData)
 				}
 			}
 			if writer, _ := bh.GetCurrentWriter("enterprisecas"); writer != nil {
@@ -838,8 +838,8 @@ func (bh *BH) LoadSchemaInfo(step int) {
 	}
 }
 
-// CacheJob represents a cache loading job
-type CacheJob struct {
+// cacheJob represents a cache loading job
+type cacheJob struct {
 	File  string
 	Label string
 }

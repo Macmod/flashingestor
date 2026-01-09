@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -29,6 +30,7 @@ type State struct {
 	AttrGUIDMap            sync.Map                    // Thread-safe map[string]string
 	DomainSIDCache         *SimpleCache
 	SIDDomainCache         *SimpleCache
+	NetBIOSDomainCache     *SimpleCache
 	MemberCache            *StringCache
 	SIDCache               *StringCache
 	HostDnsCache           *StringCache
@@ -104,6 +106,10 @@ func (st *State) Init(forestMapPath string) {
 
 	if st.SIDDomainCache == nil {
 		st.SIDDomainCache = NewSimpleCache()
+	}
+
+	if st.NetBIOSDomainCache == nil {
+		st.NetBIOSDomainCache = NewSimpleCache()
 	}
 
 	if st.SIDCache == nil {
@@ -188,7 +194,7 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 
 		domainName := entry.GetDomainFromDN()
 
-		resolvedEntry := ResolveADEntry(entry)
+		resolvedEntry := resolveADEntry(entry)
 
 		/* TODO: Review this part */
 		if resolvedEntry["objectid"] == "" {
@@ -236,10 +242,6 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 					})
 					st.domainControllersMu.Unlock()
 				}
-			}
-
-			if sAMAccountName != "" {
-				st.SamCache.Set(inferNetBIOSName(domainName)+"+"+sAMAccountName, &cacheEntry)
 			}
 		} else if identifier == "domains" {
 			domainSID := entry.GetSID()
@@ -296,6 +298,19 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 					st.CertTemplateCache.Set(domainName+"+"+oid, &cacheEntry)
 				}
 			}
+
+			// Parse crossRef objects in Partitions container to cache NetBIOS domain names
+			if slices.Contains(objectClasses, "crossRef") {
+				// systemFlags=3 indicates this crossRef represents an AD domain naming context
+				systemFlags := entry.GetAttrVal("systemFlags", "")
+				if systemFlags == "3" {
+					netbiosName := entry.GetAttrVal("nETBIOSName", "")
+					dnsRoot := entry.GetAttrVal("dnsRoot", "")
+					if netbiosName != "" && dnsRoot != "" {
+						st.NetBIOSDomainCache.Set(netbiosName, strings.ToUpper(dnsRoot))
+					}
+				}
+			}
 		}
 
 		if sAMAccountName != "" {
@@ -318,6 +333,7 @@ func (st *State) Clear() {
 
 	st.DomainSIDCache = NewSimpleCache()
 	st.SIDDomainCache = NewSimpleCache()
+	st.NetBIOSDomainCache = NewSimpleCache()
 	st.MemberCache = NewCache(ShardNumStandard)
 	st.SIDCache = NewCache(ShardNumStandard)
 	st.HostDnsCache = NewCache(ShardNumStandard)
@@ -327,4 +343,67 @@ func (st *State) Clear() {
 	st.CertTemplateCache = NewCache(ShardNumSmall)
 	st.GPOCache = NewGPOCache()
 	st.loadedCaches = make(map[string]bool)
+}
+
+func resolveADEntry(entry gildap.LDAPEntry) map[string]string {
+	resolved := make(map[string]string)
+
+	account := entry.GetAttrVal("sAMAccountName", "")
+	dn := entry.DN
+
+	var domain string
+	if dn != "" {
+		domain = entry.GetDomainFromDN()
+	}
+
+	objectClass := entry.GetAttrVals("objectClass", []string{})
+	resolved["objectid"] = entry.GetSID()
+	resolved["principal"] = strings.ToUpper(account + "@" + domain)
+
+	if account == "" {
+		// If there is no sAMAccountName, try to get some
+		// sort of identifier to replace the principal
+		// and figure out the type
+		if slices.Contains(objectClass, "domain") {
+			resolved["type"] = "Domain"
+		} else if guidStr := entry.GetGUID(); guidStr != "" {
+			// Handle objects with GUIDs (OUs / Containers, etc)
+			resolved["objectid"] = strings.ToUpper(guidStr)
+			name := entry.GetAttrVal("name", "")
+			resolved["principal"] = strings.ToUpper(name + "@" + domain)
+
+			if slices.Contains(objectClass, "organizationalUnit") {
+				resolved["type"] = "OU"
+			} else if slices.Contains(objectClass, "container") {
+				resolved["type"] = "Container"
+			} else {
+				resolved["type"] = "Base"
+			}
+		} else {
+			resolved["type"] = "Base"
+		}
+	} else {
+		// If there is a sAMAccountName, it's a nice principal; just fill its type field
+		accountTypeVal := entry.GetAttrVal("sAMAccountType", "")
+		accountType, _ := strconv.Atoi(accountTypeVal)
+
+		switch {
+		case slices.Contains([]int{268435456, 268435457, 536870912, 536870913}, accountType):
+			resolved["type"] = "Group"
+		case accountType == 805306368 ||
+			slices.Contains(objectClass, "msDS-GroupManagedServiceAccount") ||
+			slices.Contains(objectClass, "msDS-ManagedServiceAccount"):
+			resolved["type"] = "User"
+		case accountType == 805306369:
+			resolved["type"] = "Computer"
+			shortName := strings.TrimSuffix(account, "$")
+			resolved["principal"] = strings.ToUpper(shortName + "." + domain)
+		case accountType == 805306370:
+			resolved["type"] = "trustaccount"
+		default:
+			resolved["type"] = "Base"
+		}
+	}
+
+	return resolved
 }

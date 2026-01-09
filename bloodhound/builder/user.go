@@ -50,9 +50,9 @@ func BuildUserFromEntry(entry *gildap.LDAPEntry) (*User, bool) {
 		TrustedToAuth:           uac&0x01000000 == 0x01000000,
 		PasswordNotReqd:         uac&0x00000020 == 0x00000020,
 		Enabled:                 uac&2 == 0,
-		LastLogon:               FormatTime2(entry.GetAttrVal("lastLogon", "0")),          // raw
-		LastLogonTimestamp:      FormatTime2(entry.GetAttrVal("lastLogonTimestamp", "0")), // raw
-		PwdLastSet:              FormatTime2(entry.GetAttrVal("pwdLastSet", "0")),         // raw
+		LastLogon:               formatTime2(entry.GetAttrVal("lastLogon", "0")),          // raw
+		LastLogonTimestamp:      formatTime2(entry.GetAttrVal("lastLogonTimestamp", "0")), // raw
+		PwdLastSet:              formatTime2(entry.GetAttrVal("pwdLastSet", "0")),         // raw
 		DontReqPreauth:          uac&0x00400000 == 0x00400000,
 		PwdNeverExpires:         uac&0x00010000 == 0x00010000,
 		Sensitive:               uac&0x00100000 == 0x00100000,

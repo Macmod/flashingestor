@@ -55,6 +55,10 @@ func (bo *BaseADObject) FromEntry(entry *gildap.LDAPEntry, entryType string) {
 	bo.IsDeleted = entry.GetAttrVal("isDeleted", "") == "TRUE"
 
 	parentDN := entry.GetParentDN()
+	if parentDN == "" {
+		return
+	}
+
 	if strings.HasPrefix(parentDN, "CN=Builtin,") {
 		// Special handling for objects that are under the
 		// Builtin container
@@ -110,7 +114,7 @@ func (bp *BaseProperties) FromEntry(entry *gildap.LDAPEntry) {
 	if whenCreatedStr == "" {
 		bp.WhenCreated = 0
 	} else {
-		bp.WhenCreated = FormatTime1(whenCreatedStr)
+		bp.WhenCreated = formatTime1(whenCreatedStr)
 	}
 }
 

@@ -90,7 +90,7 @@ func (rc *RemoteCollector) ProcessLocalGroupMembers(ctx context.Context, localMe
 				}
 
 				results = append(results, builder.TypedPrincipal{
-					ObjectIdentifier: machineSid + "-" + GetRID(memberSid),
+					ObjectIdentifier: machineSid + "-" + getRID(memberSid),
 					ObjectType:       objectType,
 				})
 			}
@@ -99,7 +99,7 @@ func (rc *RemoteCollector) ProcessLocalGroupMembers(ctx context.Context, localMe
 
 		// If the security identifier starts with the machine sid, we need to resolve it as a local object
 		if strings.HasPrefix(memberSid, machineSid+"-") {
-			newSid := fmt.Sprintf("%s-%s", machineSid, GetRID(memberSid))
+			newSid := fmt.Sprintf("%s-%s", machineSid, getRID(memberSid))
 
 			rpcObj, err := msrpc.NewLsatRPC(ctx, machineHost, rc.auth)
 			if err != nil {

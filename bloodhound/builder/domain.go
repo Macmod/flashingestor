@@ -93,7 +93,7 @@ func BuildDomainFromEntry(domainEntry *gildap.LDAPEntry, trustEntries []gildap.L
 
 	// --- When created ---
 	whenCreatedStr := domainEntry.GetAttrVal("whenCreated", "")
-	whenCreated := FormatTime1(whenCreatedStr)
+	whenCreated := formatTime1(whenCreatedStr)
 
 	// Domain name and SID
 	domainName := domainEntry.GetDomainFromDN()
@@ -181,7 +181,7 @@ func BuildDomainFromEntry(domainEntry *gildap.LDAPEntry, trustEntries []gildap.L
 
 	// --- Parse linked GPOs ---
 	gplinkStr := domainEntry.GetAttrVal("gPLink", "")
-	gplinks := ParseGPLinkString(gplinkStr)
+	gplinks := parseGPLinkString(gplinkStr)
 
 	for _, link := range gplinks {
 		if link.Option == 0 || link.Option == 2 {

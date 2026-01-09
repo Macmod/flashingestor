@@ -33,7 +33,7 @@ func BuildRootCAFromEntry(entry *gildap.LDAPEntry) (*RootCA, bool) {
 
 	// Certificate - using cACertificate attribute
 	certData := entry.GetAttrRawVal("cACertificate", nil)
-	if certInfo := ParseCACertificate(certData); certInfo != nil {
+	if certInfo := parseCACertificate(certData); certInfo != nil {
 		rootca.Properties.CertThumbprint = certInfo.Thumbprint
 		rootca.Properties.CertName = certInfo.Name
 		rootca.Properties.CertChain = certInfo.Chain

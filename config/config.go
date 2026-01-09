@@ -17,7 +17,6 @@ type Config struct {
 	DomainController string
 	OutputDir        string
 	LogFile          string
-	CPUProfile       string
 	RemoteWorkers    int
 	DNSWorkers       int
 	RemoteTimeout    time.Duration
@@ -96,7 +95,6 @@ func ParseFlags() (*Config, error) {
 	// Basic settings
 	pflag.StringVar(&config.OutputDir, "outdir", "./output", "Directory to store results")
 	pflag.StringVar(&config.LogFile, "log", "", "Path to log file (optional, logs will be written to both file and UI)")
-	pflag.StringVar(&config.CPUProfile, "cpuprofile", "", "If set, write a CPU profile to this file")
 	pflag.StringVar(&config.ConfigPath, "config", "config.yaml", "Path to YAML config file (optional)")
 	pflag.StringVar(&config.CustomDns, "dns", "", "Custom DNS resolver to use")
 	pflag.BoolVar(&config.DnsTcp, "dns-tcp", false, "Use DNS over TCP instead of UDP")

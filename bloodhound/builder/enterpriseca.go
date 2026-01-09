@@ -34,7 +34,7 @@ func BuildEnterpriseCAFromEntry(entry *gildap.LDAPEntry) (*EnterpriseCA, bool) {
 
 	// Certificate - using cACertificate attribute
 	certData := entry.GetAttrRawVal("cACertificate", nil)
-	if certInfo := ParseCACertificate(certData); certInfo != nil {
+	if certInfo := parseCACertificate(certData); certInfo != nil {
 		enterpriseCA.Properties.CertThumbprint = certInfo.Thumbprint
 		enterpriseCA.Properties.CertName = certInfo.Name
 		enterpriseCA.Properties.CertChain = certInfo.Chain

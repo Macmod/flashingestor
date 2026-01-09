@@ -66,7 +66,7 @@ func (c *ParentChildCache) shardFor(h uint64) *parentShard {
 
 // AddChild adds a child object to the specified parent DN.
 func (c *ParentChildCache) AddChild(parentDN string, child *Entry) {
-	h := GetHash(parentDN)
+	h := getHash(parentDN)
 	s := c.shardFor(h)
 	s.mu.Lock()
 	s.m[h] = append(s.m[h], *child)
@@ -75,7 +75,7 @@ func (c *ParentChildCache) AddChild(parentDN string, child *Entry) {
 
 // SetChildren sets all children for a parent DN (replaces existing).
 func (c *ParentChildCache) SetChildren(parentDN string, children []Entry) {
-	h := GetHash(parentDN)
+	h := getHash(parentDN)
 	s := c.shardFor(h)
 	s.mu.Lock()
 	s.m[h] = make([]Entry, len(children))
@@ -85,7 +85,7 @@ func (c *ParentChildCache) SetChildren(parentDN string, children []Entry) {
 
 // GetChildren retrieves all direct children for a parent DN.
 func (c *ParentChildCache) GetChildren(parentDN string) ([]Entry, bool) {
-	h := GetHash(parentDN)
+	h := getHash(parentDN)
 	s := c.shardFor(h)
 	s.mu.RLock()
 	children, ok := s.m[h]
@@ -97,12 +97,54 @@ func (c *ParentChildCache) GetChildren(parentDN string) ([]Entry, bool) {
 	result := make([]Entry, len(children))
 	copy(result, children)
 	s.mu.RUnlock()
+	/*
+		if !ok {
+			cachemiss(parentDN)
+		}
+	*/
 	return result, true
 }
 
+/*
+// Useful for troubleshooting
+func cachemiss(key string) {
+	pc1, _, _, ok := runtime.Caller(1)
+	if !ok {
+		return
+	}
+
+	funcDetails1 := runtime.FuncForPC(pc1)
+	if funcDetails1 == nil {
+		return
+	}
+
+	pc2, _, _, ok := runtime.Caller(2)
+	if !ok {
+		return
+	}
+
+	funcDetails2 := runtime.FuncForPC(pc2)
+	if funcDetails2 == nil {
+		return
+	}
+
+	pc3, _, _, ok := runtime.Caller(3)
+	if !ok {
+		return
+	}
+
+	funcDetails3 := runtime.FuncForPC(pc3)
+	if funcDetails3 == nil {
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "Cache miss for key: %s\n  from %s\n    from %s\n      from %s\n", key, funcDetails1.Name(), funcDetails2.Name(), funcDetails3.Name())
+}
+*/
+
 // HasChildren checks if a parent DN has any children without returning them.
 func (c *ParentChildCache) HasChildren(parentDN string) bool {
-	h := GetHash(parentDN)
+	h := getHash(parentDN)
 	s := c.shardFor(h)
 	s.mu.RLock()
 	children, ok := s.m[h]
@@ -113,7 +155,7 @@ func (c *ParentChildCache) HasChildren(parentDN string) bool {
 
 // Delete removes all children for a parent DN.
 func (c *ParentChildCache) Delete(parentDN string) {
-	h := GetHash(parentDN)
+	h := getHash(parentDN)
 	s := c.shardFor(h)
 	s.mu.Lock()
 	delete(s.m, h)
@@ -185,7 +227,7 @@ func (c *StringCache) shardFor(h uint64) *shard {
 
 // Set stores or updates an entry keyed by a key.
 func (c *StringCache) Set(key string, e *Entry) {
-	h := GetHash(key)
+	h := getHash(key)
 	s := c.shardFor(h)
 	s.mu.Lock()
 	s.m[h] = *e
@@ -194,17 +236,22 @@ func (c *StringCache) Set(key string, e *Entry) {
 
 // Get retrieves an entry by a key. Returns (Entry, true) if found.
 func (c *StringCache) Get(key string) (Entry, bool) {
-	h := GetHash(key)
+	h := getHash(key)
 	s := c.shardFor(h)
 	s.mu.RLock()
 	e, ok := s.m[h]
 	s.mu.RUnlock()
+	/*
+		if !ok {
+			cachemiss(key)
+		}
+	*/
 	return e, ok
 }
 
 // Delete removes an entry by a key if present.
 func (c *StringCache) Delete(dn string) {
-	h := GetHash(dn)
+	h := getHash(dn)
 	s := c.shardFor(h)
 	s.mu.Lock()
 	delete(s.m, h)
@@ -248,6 +295,11 @@ func (c *SimpleCache) Get(key string) (string, bool) {
 	c.mu.RLock()
 	sid, ok := c.m[strings.ToUpper(key)]
 	c.mu.RUnlock()
+	/*
+		if !ok {
+			cachemiss(key)
+		}
+	*/
 	return sid, ok
 }
 
@@ -282,5 +334,10 @@ func (c *GPOCache) Get(dn string) (*GPOCacheEntry, bool) {
 	c.mu.RLock()
 	entry, ok := c.m[strings.ToLower(dn)]
 	c.mu.RUnlock()
+	/*
+		if !ok {
+			cachemiss(dn)
+		}
+	*/
 	return entry, ok
 }

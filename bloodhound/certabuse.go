@@ -66,7 +66,7 @@ func (cap *CertAbuseProcessor) ProcessRegistryEnrollmentPermissions(
 	}
 
 	isDomainController := cap.isDomainController(computerObjectId)
-	machineSid, _ := builder.GetMachineSID(ctx, cap.auth, computerName, computerObjectId)
+	machineSid, _ := getMachineSID(ctx, cap.auth, computerName, computerObjectId)
 
 	var aces []builder.ACE
 
@@ -187,7 +187,7 @@ func (cap *CertAbuseProcessor) ProcessEAPermissions(
 	}
 
 	isDomainController := cap.isDomainController(computerObjectId)
-	machineSid, _ := builder.GetMachineSID(ctx, cap.auth, computerName, computerObjectId)
+	machineSid, _ := getMachineSID(ctx, cap.auth, computerName, computerObjectId)
 
 	// Parse security descriptor using winacl
 	sd := &securitydescriptor.NtSecurityDescriptor{}
@@ -346,14 +346,14 @@ func (cap *CertAbuseProcessor) getRegistryPrincipal(
 		}
 
 		return builder.TypedPrincipal{
-			ObjectIdentifier: computerObjectId + "-" + GetRID(sidStr),
+			ObjectIdentifier: computerObjectId + "-" + getRID(sidStr),
 			ObjectType:       objectType,
 		}, true
 	}
 
 	// Proper local users / groups have SIDs starting with their machine SID
 	if machineSid != "" && strings.HasPrefix(sidStr, machineSid+"-") {
-		groupRid := GetRID(sidStr)
+		groupRid := getRID(sidStr)
 		newSid := fmt.Sprintf("%s-%s", computerObjectId, groupRid)
 
 		// Type is likely wrongly inferred as LocalGroup, but the original

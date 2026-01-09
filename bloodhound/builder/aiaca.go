@@ -33,7 +33,7 @@ func BuildAIACAFromEntry(entry *gildap.LDAPEntry) (*AIACA, bool) {
 
 	// Certificate - using cACertificate attribute
 	certData := entry.GetAttrRawVal("cACertificate", nil)
-	if certInfo := ParseCACertificate(certData); certInfo != nil {
+	if certInfo := parseCACertificate(certData); certInfo != nil {
 		aiaca.Properties.CertThumbprint = certInfo.Thumbprint
 		aiaca.Properties.CertName = certInfo.Name
 		aiaca.Properties.CertChain = certInfo.Chain

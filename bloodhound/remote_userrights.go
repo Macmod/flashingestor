@@ -10,8 +10,8 @@ import (
 	lsat "github.com/oiweiwei/go-msrpc/msrpc/lsat/lsarpc/v0"
 )
 
-// GetRID extracts the Relative Identifier (final component) from a SID string
-func GetRID(sid string) string {
+// getRID extracts the Relative Identifier (final component) from a SID string
+func getRID(sid string) string {
 	parts := strings.Split(sid, "-")
 	return parts[len(parts)-1]
 }
@@ -43,7 +43,7 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 		return []builder.UserRightsAPIResult{result}
 	}
 
-	machineSid, _ := builder.GetMachineSID(ctx, rc.auth, targetIp, computerObjectId)
+	machineSid, _ := getMachineSID(ctx, rc.auth, targetIp, computerObjectId)
 
 	results := []builder.UserRightsAPIResult{}
 
@@ -86,7 +86,7 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 					}
 
 					result.Results = append(result.Results, builder.TypedPrincipal{
-						ObjectIdentifier: computerObjectId + "-" + GetRID(principalSid),
+						ObjectIdentifier: computerObjectId + "-" + getRID(principalSid),
 						ObjectType:       objectType,
 					})
 				}
@@ -94,7 +94,7 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 			}
 
 			if machineSid != "" && strings.HasPrefix(principalSid, machineSid+"-") {
-				newSid := fmt.Sprintf("%s-%s", machineSid, GetRID(principalSid))
+				newSid := fmt.Sprintf("%s-%s", machineSid, getRID(principalSid))
 
 				// Need LsatRPC for SID lookup
 				lsatObj, err := msrpc.NewLsatRPC(ctx, targetIp, rc.auth)

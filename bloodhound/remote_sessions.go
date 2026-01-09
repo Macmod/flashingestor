@@ -66,7 +66,7 @@ func (rc *RemoteCollector) collectSessions(ctx context.Context, targetHost strin
 				}
 			}
 
-			realComputerSid, ok := builder.ResolveHostname(ctx, rc.auth, computerSessionName, targetDomain)
+			realComputerSid, ok := resolveHostname(ctx, rc.auth, computerSessionName, targetDomain)
 			if ok {
 				resolvedComputerSID = realComputerSid
 			}

@@ -40,13 +40,18 @@ func (rc *RemoteCollector) collectPrivilegedSessions(ctx context.Context, target
 			continue
 		}
 
+		domain := user.Domain
+		if resolvedDomain, ok := builder.BState().NetBIOSDomainCache.Get(domain); ok && resolvedDomain != "" {
+			domain = resolvedDomain
+		}
+
 		// Ignore empty usernames and machine accounts
 		if strings.TrimSpace(user.Username) == "" ||
 			strings.HasSuffix(user.Username, "$") {
 			continue
 		}
 
-		userObj, ok := builder.BState().SamCache.Get(user.Domain + "+" + user.Username)
+		userObj, ok := builder.BState().SamCache.Get(domain + "+" + user.Username)
 		if !ok {
 			continue
 		}

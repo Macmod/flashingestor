@@ -7,7 +7,23 @@ import (
 	gildap "github.com/Macmod/flashingestor/ldap"
 )
 
-// buildContainerFromEntry converts an LDAP entry into a Container structure.
+// IsFilteredContainer checks if a container DN should be filtered out.
+func IsFilteredContainer(containerDN string) bool {
+	if containerDN == "" {
+		return true
+	}
+
+	dn := strings.ToUpper(containerDN)
+	if strings.Contains(dn, "CN=DOMAINUPDATES,CN=SYSTEM,DC=") {
+		return true
+	}
+	if strings.Contains(dn, "CN=POLICIES,CN=SYSTEM,DC=") &&
+		(strings.HasPrefix(dn, "CN=USER") || strings.HasPrefix(dn, "CN=MACHINE")) {
+		return true
+	}
+	return false
+}
+
 // BuildContainerFromEntry constructs a Container object from an LDAP entry.
 func BuildContainerFromEntry(entry *gildap.LDAPEntry) (*Container, bool) {
 	guid := entry.GetGUID()
