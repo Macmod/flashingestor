@@ -70,8 +70,7 @@ func (r *RemoteCollectionManager) start(uiApp *ui.Application) {
 	uiApp.SetupRemoteCollectionTable()
 
 	// Start spinner for remote collection table
-	var spinner *ui.Spinner
-	spinner = ui.NewSingleTableSpinner(uiApp, uiApp.GetRemoteCollectTable(), 0)
+	spinner := ui.NewSingleTableSpinner(uiApp, uiApp.GetRemoteCollectTable(), 0)
 	spinner.Start()
 
 	// Start consumer for remote collection updates

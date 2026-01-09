@@ -838,12 +838,6 @@ func (bh *BH) LoadSchemaInfo(step int) {
 	}
 }
 
-// cacheJob represents a cache loading job
-type cacheJob struct {
-	File  string
-	Label string
-}
-
 // PerformConversion transforms LDAP data to BloodHound JSON format with progress tracking.
 const TotalConversionSteps = 11
 

@@ -39,7 +39,7 @@ func (l *LDAPEntry) GetAttrVals(attrName string, defValue []string) []string {
 func (l *LDAPEntry) GetAttrVal(attrName string, defValue string) string {
 	vals := l.GetAttrVals(attrName, []string{defValue})
 
-	if vals != nil && len(vals) > 0 {
+	if len(vals) > 0 {
 		return vals[0]
 	}
 
@@ -59,7 +59,7 @@ func (l *LDAPEntry) GetAttrRawVals(attrName string, defValue [][]byte) [][]byte 
 func (l *LDAPEntry) GetAttrRawVal(attrName string, defValue []byte) []byte {
 	vals := l.GetAttrRawVals(attrName, [][]byte{defValue})
 
-	if vals != nil && len(vals) > 0 {
+	if len(vals) > 0 {
 		return vals[0]
 	}
 
