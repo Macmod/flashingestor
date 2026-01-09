@@ -15,6 +15,10 @@ import (
 	"github.com/spf13/pflag"
 )
 
+var (
+	version = "0.1.0"
+)
+
 type DCResult struct {
 	Hostname        string
 	IPAddress       string
@@ -71,6 +75,8 @@ func main() {
 }
 
 func parseFlags() {
+	var showVersion bool
+	pflag.BoolVarP(&showVersion, "version", "v", false, "Show version information and exit")
 	pflag.StringVarP(&domain, "domain", "d", "", "Domain name to query for DCs (required)")
 	pflag.StringVar(&dnsServer, "dns", "", "Custom DNS server (default: system resolver)")
 	pflag.BoolVar(&dnsTCP, "dns-tcp", false, "Use TCP for DNS queries instead of UDP")
@@ -79,6 +85,11 @@ func parseFlags() {
 	pflag.BoolVarP(&noColors, "no-colors", "N", false, "Disable colored output")
 	pflag.StringVar(&tests, "tests", "ldap,ldaps,kerberos,ping", "Comma-separated list of tests to run (ldap,ldaps,kerberos,kpasswd,gc,gcssl,smb,epm,netbios,rdp,ping)")
 	pflag.Parse()
+
+	if showVersion {
+		fmt.Printf("dcprobe %s\n", version)
+		os.Exit(0)
+	}
 
 	if noColors {
 		color.NoColor = true

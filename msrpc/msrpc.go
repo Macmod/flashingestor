@@ -1,3 +1,5 @@
+// Package msrpc provides Microsoft RPC client implementations for remote
+// collection of Active Directory data via various RPC protocols.
 package msrpc
 
 import (

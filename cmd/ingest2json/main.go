@@ -11,11 +11,21 @@ import (
 	"github.com/Macmod/flashingestor/reader"
 )
 
+var (
+	version = "0.1.0"
+)
+
 func main() {
+	showVersion := flag.Bool("version", false, "Show version information and exit")
 	inputFile := flag.String("in", "", "Input msgpack file path (required)")
 	outputFile := flag.String("out", "", "Output JSON file path (required)")
-	indent := flag.Bool("indent", false, "Pretty-print JSON with indentation")
+	indent := flag.Bool("pretty", false, "Pretty-print JSON with indentation")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("ingest2json %s\n", version)
+		os.Exit(0)
+	}
 
 	if *inputFile == "" || *outputFile == "" {
 		fmt.Fprintln(os.Stderr, "Usage: ./ingest2json -in <msgpack_file> -out <json_file> [-indent]")

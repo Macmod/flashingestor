@@ -13,7 +13,7 @@ The main goals of this project are:
 2. Be faster, less noisy, and more customizable than other collectors
 3. Be a friendly TUI (terminal user interface) with progress tracking
 
-This is still a *beta* version, released just to demonstrate the concept - don't expect everything to work perfectly. If you find any bugs pleasee contribute with issues, PRs or discussions 🙂
+This is still a *beta* version, released just to demonstrate the concept - don't expect everything to work perfectly. If you find any bugs please contribute with issues, PRs or discussions 🙂
 
 # Implementation Details
 
@@ -126,7 +126,7 @@ A nice way of inspecting these files would be to use [JQ](https://jqlang.org/)/[
 
 # Contributing
 
-Contributions are welcome by [opening an issue](https://github.com/Macmod/godap/issues/new) or by [submitting a pull request](https://github.com/Macmod/godap/pulls).
+Contributions are welcome by [opening an issue](https://github.com/Macmod/flashingestor/issues/new) or by [submitting a pull request](https://github.com/Macmod/flashingestor/pulls).
 
 # Acknowledgements
 

@@ -88,7 +88,6 @@ func (m *LsatRPC) LookupSids(sids []string) ([]ResolvedSID, error) {
 			sidsToLookup = append(sidsToLookup, &lsat.SIDInformation{
 				SID: sidObj.SID,
 			})
-			fmt.Println(sidObj.ToString())
 		}
 	}
 

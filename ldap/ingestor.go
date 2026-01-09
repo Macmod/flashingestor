@@ -1,3 +1,5 @@
+// Package ldap implements LDAP ingestion functionality for Active Directory
+// queries and data collection.
 package ldap
 
 import (

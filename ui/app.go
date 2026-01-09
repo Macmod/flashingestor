@@ -1,3 +1,5 @@
+// Package ui implements the terminal user interface (TUI) for flashingestor
+// using tview, providing interactive progress tracking and control.
 package ui
 
 import (

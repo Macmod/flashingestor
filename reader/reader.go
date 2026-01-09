@@ -1,3 +1,5 @@
+// Package reader provides functionality for reading MessagePack-encoded
+// data files produced during LDAP ingestion.
 package reader
 
 import (

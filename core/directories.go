@@ -1,7 +1,9 @@
+// Package core provides core functionality for flashingestor including
+// directory management, logging, and event handling.
 package core
 
 import (
-	"log"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -22,15 +24,15 @@ func SetupDirectories(baseDir string) (*Directories, error) {
 	}
 
 	if err := os.MkdirAll(dirs.LDAP, 0755); err != nil {
-		log.Fatal("Failed to create `"+dirs.LDAP+"` folder:", err)
+		return nil, fmt.Errorf("failed to create %s folder: %w", dirs.LDAP, err)
 	}
 
 	if err := os.MkdirAll(dirs.Remote, 0755); err != nil {
-		log.Fatal("Failed to create `"+dirs.Remote+"` folder:", err)
+		return nil, fmt.Errorf("failed to create %s folder: %w", dirs.Remote, err)
 	}
 
 	if err := os.MkdirAll(dirs.BloodHound, 0755); err != nil {
-		log.Fatal("Failed to create `"+dirs.BloodHound+"` folder:", err)
+		return nil, fmt.Errorf("failed to create %s folder: %w", dirs.BloodHound, err)
 	}
 
 	return dirs, nil

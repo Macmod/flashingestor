@@ -16,12 +16,18 @@ import (
 	"github.com/Macmod/flashingestor/ui"
 )
 
-var versionString = "v1.0.0"
+var (
+	version = "0.1.0"
+)
 
 // Application entry point
 func main() {
 	cfg, err := config.ParseFlags()
 	if err != nil {
+		if err.Error() == "VERSION_REQUESTED" {
+			printVersion()
+			os.Exit(0)
+		}
 		log.Fatal(err)
 	}
 
@@ -56,7 +62,7 @@ func main() {
 	logger := core.NewLogger(logChannel, logFile, uiApp, verboseLevel)
 	go logger.Start()
 
-	logFunc("🧩 Welcome to FlashIngestor " + versionString)
+	logFunc("🧩 Welcome to FlashIngestor " + version)
 	logFunc("⭕ [blue]Config file[-]: " + cfg.ConfigPath)
 	logFunc("⭕ [blue]Output folder[-]: " + cfg.OutputDir)
 
@@ -264,4 +270,9 @@ func main() {
 	if err := uiApp.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// printVersion prints version information
+func printVersion() {
+	fmt.Printf("flashingestor %s\n", version)
 }

@@ -1,3 +1,5 @@
+// Package config handles command-line flags, authentication, and runtime
+// configuration for flashingestor.
 package config
 
 import (
@@ -88,9 +90,14 @@ func (d *DialerWithResolver) Dial(network, addr string) (net.Conn, error) {
 // ParseFlags parses command line flags and returns a configuration instance
 func ParseFlags() (*Config, error) {
 	var err error
+	var showVersion bool
+	
 	config := &Config{
 		LdapAuthOptions: &ldapauth.Options{},
 	}
+
+	// Version flag
+	pflag.BoolVarP(&showVersion, "version", "v", false, "Show version information and exit")
 
 	// Basic settings
 	pflag.StringVar(&config.OutputDir, "outdir", "./output", "Directory to store results")
@@ -115,6 +122,12 @@ func ParseFlags() (*Config, error) {
 	registerLdapFlags(config.LdapAuthOptions, pflag.CommandLine)
 
 	pflag.Parse()
+
+	// Check for version flag first
+	if showVersion {
+		// Return a special error that signals version was requested
+		return nil, fmt.Errorf("VERSION_REQUESTED")
+	}
 
 	// Setup DNS resolver
 	resolver := net.DefaultResolver

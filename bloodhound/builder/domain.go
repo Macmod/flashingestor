@@ -2,7 +2,6 @@ package builder
 
 import (
 	"encoding/hex"
-	"log"
 	"strconv"
 	"strings"
 
@@ -79,7 +78,6 @@ func parseTrust(flags int, direction int) (string, string, bool, bool, bool) {
 // BuildDomainFromEntry constructs a Domain object from LDAP entries.
 func BuildDomainFromEntry(domainEntry *gildap.LDAPEntry, trustEntries []gildap.LDAPEntry) *Domain {
 	if domainEntry == nil {
-		log.Println("❌ Domain object is nil; aborting domain enumeration.")
 		return nil
 	}
 
@@ -87,7 +85,6 @@ func BuildDomainFromEntry(domainEntry *gildap.LDAPEntry, trustEntries []gildap.L
 	levelID := domainEntry.GetAttrVal("msDS-Behavior-Version", "")
 	functionalLevel, ok := gildap.FUNCTIONAL_LEVELS[levelID]
 	if !ok {
-		log.Println("❌ Domain functional level doesn't make sense")
 		return nil
 	}
 

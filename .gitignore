@@ -1,2 +1,49 @@
+# Outputs
 output/
+
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+flashingestor
+dcprobe
+ingest2json
+
+# Test binaries
+*.test
+*.out
+
+# Coverage
+*.coverprofile
+coverage.txt
+
+# Go workspace file
+go.work
+go.work.sum
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Vendor
 vendor/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
