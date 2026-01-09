@@ -783,39 +783,41 @@ func (bh *BH) processComputerResults(step int, resultChan chan struct {
 			*successCount++
 		}
 
-		// Progress reporting
-		now := time.Now()
-		elapsed := now.Sub(startTime)
-		avgRate := float64(*processedCount) / elapsed.Seconds()
+		// Progress reporting - report every 10 computers or when complete
+		if *processedCount%10 == 0 || *processedCount == len(computers) {
+			now := time.Now()
+			elapsed := now.Sub(startTime)
+			avgRate := float64(*processedCount) / elapsed.Seconds()
 
-		timeSinceLastCheck := now.Sub(lastCheckTime)
-		processSinceLastCheck := *processedCount - lastProcessedCount
-		instRate := float64(processSinceLastCheck) / timeSinceLastCheck.Seconds()
+			timeSinceLastCheck := now.Sub(lastCheckTime)
+			processSinceLastCheck := *processedCount - lastProcessedCount
+			instRate := float64(processSinceLastCheck) / timeSinceLastCheck.Seconds()
 
-		lastCheckTime = now
-		lastProcessedCount = *processedCount
+			lastCheckTime = now
+			lastProcessedCount = *processedCount
 
-		remaining := len(computers) - *processedCount
-		var eta time.Duration
-		if avgRate > 0 {
-			eta = time.Duration(float64(remaining)/avgRate) * time.Second
-		}
+			remaining := len(computers) - *processedCount
+			var eta time.Duration
+			if avgRate > 0 {
+				eta = time.Duration(float64(remaining)/avgRate) * time.Second
+			}
 
-		progressPercent := float64(*processedCount) / float64(len(computers)) * 100.0
-		successPercent := float64(*successCount) / float64(len(computers)) * 100.0
+			progressPercent := float64(*processedCount) / float64(len(computers)) * 100.0
+			successPercent := float64(*successCount) / float64(len(computers)) * 100.0
 
-		// Send channel update
-		if bh.RemoteCollectionUpdates != nil {
-			bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
-				Step:      step,
-				Processed: *processedCount,
-				Total:     len(computers),
-				Percent:   progressPercent,
-				Speed:     fmt.Sprintf("%.1f/s", instRate),
-				AvgSpeed:  fmt.Sprintf("%.1f/s", avgRate),
-				Success:   fmt.Sprintf("%d/%d (%.1f%%)", *successCount, len(computers), successPercent),
-				ETA:       eta.Round(time.Second).String(),
-				Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+			// Send channel update
+			if bh.RemoteCollectionUpdates != nil {
+				bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+					Step:      step,
+					Processed: *processedCount,
+					Total:     len(computers),
+					Percent:   progressPercent,
+					Speed:     fmt.Sprintf("%.1f/s", instRate),
+					AvgSpeed:  fmt.Sprintf("%.1f/s", avgRate),
+					Success:   fmt.Sprintf("%d/%d (%.1f%%)", *successCount, len(computers), successPercent),
+					ETA:       eta.Round(time.Second).String(),
+					Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+				}
 			}
 		}
 	}
