@@ -495,7 +495,7 @@ func testTCPConnection(host, port string, timeout time.Duration) (time.Duration,
 	if err != nil {
 		return 0, err
 	}
-	conn.Close()
+	defer conn.Close()
 	return latency, nil
 }
 

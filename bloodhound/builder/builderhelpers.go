@@ -202,7 +202,7 @@ type CertificateInfo struct {
 
 // parseCACertificate parses a cACertificate attribute and returns certificate information
 func parseCACertificate(certData []byte) *CertificateInfo {
-	if certData == nil || len(certData) == 0 {
+	if len(certData) == 0 {
 		return nil
 	}
 

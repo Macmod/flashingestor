@@ -14,12 +14,12 @@ type Entry struct {
 func (e *Entry) FromTypedPrincipal(r *TypedPrincipal) {
 	e.ObjectIdentifier = r.ObjectIdentifier
 
-	objTypeRaw, _ := StrToObjectTypeRawMap[r.ObjectType]
+	objTypeRaw := StrToObjectTypeRawMap[r.ObjectType]
 	e.ObjectTypeRaw = objTypeRaw
 }
 
 func (e *Entry) ToTypedPrincipal() TypedPrincipal {
-	objTypeStr, _ := ObjectTypeRawToStrMap[e.ObjectTypeRaw]
+	objTypeStr := ObjectTypeRawToStrMap[e.ObjectTypeRaw]
 
 	return TypedPrincipal{
 		ObjectIdentifier: e.ObjectIdentifier,

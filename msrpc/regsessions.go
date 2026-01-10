@@ -8,6 +8,8 @@ import (
 	"github.com/oiweiwei/go-msrpc/msrpc/rrp/winreg/v1"
 )
 
+var sidRegex = regexp.MustCompile(`^S-1-5-21-[0-9]+-[0-9]+-[0-9]+-[0-9]+$`)
+
 func (m *WinregRPC) GetSessionsFromRegistry(ctx context.Context) ([]string, error) {
 	sids := make([]string, 0)
 
@@ -34,7 +36,7 @@ func (m *WinregRPC) GetSessionsFromRegistry(ctx context.Context) ([]string, erro
 		})
 
 		result := resp.NameOut.Buffer
-		if ok, _ := regexp.MatchString(`^S-1-5-21-[0-9]+-[0-9]+-[0-9]+-[0-9]+$`, result); ok {
+		if sidRegex.MatchString(result) {
 			sids = append(sids, resp.NameOut.Buffer)
 		}
 	}

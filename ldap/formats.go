@@ -82,7 +82,7 @@ func ConvertGUID(portion string) string {
 func EncodeGUID(guid string) (string, error) {
 	tokens := strings.Split(guid, "-")
 	if len(tokens) != 5 {
-		return "", fmt.Errorf("Wrong GUID format")
+		return "", fmt.Errorf("wrong GUID format")
 	}
 
 	result := ""

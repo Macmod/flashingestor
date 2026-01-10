@@ -721,25 +721,25 @@ func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collec
 func (bh *BH) checkAnyRpcSuccess(result RemoteCollectionResult) bool {
 	// Kind of a hacky way to check if "any relevant call succeeded"
 	// but for now it works :)
-	if result.Sessions.Collected == true ||
-		result.PrivilegedSessions.Collected == true ||
-		result.RegistrySessions.Collected == true ||
-		result.NTLMRegistryData.Collected == true ||
-		result.IsWebClientRunning.Collected == true ||
+	if result.Sessions.Collected ||
+		result.PrivilegedSessions.Collected ||
+		result.RegistrySessions.Collected ||
+		result.NTLMRegistryData.Collected ||
+		result.IsWebClientRunning.Collected ||
 		result.DCRegistryData.CertificateMappingMethods != nil ||
 		result.DCRegistryData.StrongCertificateBindingEnforcement != nil ||
 		result.DCRegistryData.VulnerableNetlogonSecurityDescriptor != nil {
 		return true
 	}
 
-	if result.UserRights != nil && len(result.UserRights) > 0 {
-		if result.UserRights[0].Collected == true {
+	if len(result.UserRights) > 0 {
+		if result.UserRights[0].Collected {
 			return true
 		}
 	}
 
-	if result.LocalGroups != nil && len(result.LocalGroups) > 0 {
-		if result.LocalGroups[0].Collected == true {
+	if len(result.LocalGroups) > 0 {
+		if result.LocalGroups[0].Collected {
 			return true
 		}
 	}

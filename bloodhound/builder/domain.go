@@ -22,15 +22,6 @@ var trustFlags = map[string]int{
 	"CROSS_ORGANIZATION_ENABLE_TGT_DELEGATION": 0x00000800,
 }
 
-// BloodHound trust types
-var bhTrustType = map[string]int{
-	"ParentChild": 0,
-	"CrossLink":   1,
-	"Forest":      2,
-	"External":    3,
-	"Unknown":     4,
-}
-
 var bhTrustDirection = map[int]string{
 	0x01: "Inbound",
 	0x02: "Outbound",
