@@ -783,8 +783,8 @@ func (bh *BH) processComputerResults(step int, resultChan chan struct {
 			*successCount++
 		}
 
-		// Progress reporting - report every 10 computers or when complete
-		if *processedCount%10 == 0 || *processedCount == len(computers) {
+		// Progress reporting
+		if *processedCount%1 == 0 {
 			now := time.Now()
 			elapsed := now.Sub(startTime)
 			avgRate := float64(*processedCount) / elapsed.Seconds()

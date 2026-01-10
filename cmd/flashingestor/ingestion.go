@@ -625,8 +625,9 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 			rootDN, err = m.testLDAPConnection(testCtx2, ldapTarget, &fallbackLdapOptions)
 			if err == nil {
 				m.logFunc("✅ [green]LDAP fallback successful for \"%s\"[-]", domainName)
-				// Use the LDAP target and update LDAP options
+				// Use the LDAP target and update domain controller for subsequent operations
 				target = ldapTarget
+				domainController = ldapDC
 				ldapOptions = &fallbackLdapOptions
 			} else {
 				m.logFunc("❌ [red]LDAP fallback also failed for \"%s\": %v[-]", domainName, err)
