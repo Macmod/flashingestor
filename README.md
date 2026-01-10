@@ -35,22 +35,19 @@ This is still a *beta* version, released just to demonstrate the concept - don't
 
 The main difference resource-wise is that `flashingestor` needs a bit more space to store the intermediate `msgpack` files, and it takes a bit of time to convert them into BloodHound format, but the active steps `Ingest` & `Remote` *should* be relatively efficient in terms of traffic, CPU & memory.
 
-## Not Implemented
-
-### Remote Collection
-
-* `GPOChanges` collection is not implemented for `Domain` / `OrganizationalUnit` types.
-* `SmbInfo` and `Status` collections are not implemented for the `Computer` type.
-* `HttpEnrollmentEndpoints` only works with a provided username/password.
-* `AllowedToDelegateTo` / `ServicePrincipalNames` resolution is still a basic implementation
-* `ldapsigning` is not collected for DC `Computer` objects; `ldapsepa` is prone to false positives.
-
 # Installation
 ```bash
 $ git clone https://github.com/Macmod/flashingestor
 $ cd flashingestor
+
+# To build only:
 $ go build ./cmd/flashingestor
+
+# To install the executable to $GOBIN or $GOPATH/bin:
+$ go install ./cmd/flashingestor
 ```
+
+You can also use pre-built binaries from the provided [Releases](https://github.com/Macmod/flashingestor/releases).
 
 # Usage
 
@@ -145,6 +142,20 @@ Contributions are welcome by [opening an issue](https://github.com/Macmod/flashi
 * Thanks to [oiweiwei](https://github.com/oiweiwei) for [go-msrpc](https://github.com/oiweiwei/go-msrpc), as his library made it possible to implement remote collection methods based on RPCs.
 
 # Known Issues
+
+## Ingestion
+
+* `recurse_trusts` / `search_forest` only automatically authenticate to LDAP in other discovered domains with the specified credentials from the source domain when the provided authentication material is either a `plain password` or an `NT hash`; using a TGT to issue a referral ticket for this purpose is theoretically possible but [not yet implemented](https://github.com/RedTeamPentesting/adauth) in the `adauth` library.
+
+## Remote Collection
+
+* `GPOChanges` collection is not implemented for `Domain` / `OrganizationalUnit` types.
+* `SmbInfo` and `Status` collections are not implemented for the `Computer` type.
+* `HttpEnrollmentEndpoints` only works with a provided username/password.
+* `AllowedToDelegateTo` / `ServicePrincipalNames` resolution is still a basic implementation
+* `ldapsigning` is not collected for DC `Computer` objects; `ldapsepa` is prone to false positives.
+
+## General
 
 * Almost all properties implemented in SharpHound are supported, but there are many architectural differences between this tool and SharpHound, so don't expect the output to match the official implementation exactly (with exception of eventual bugs). Key differences may arise especially for the more complex implementations, such as remote collections via RPC and collections related to CA/certificate abuse.
 
