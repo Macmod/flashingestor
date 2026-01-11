@@ -179,7 +179,7 @@ remote_collection:
     - certservices
     - webclient
     - localgroups
-    - ldapservices 
+    - ldapservices
     - smbinfo
 
 # Conversion Settings

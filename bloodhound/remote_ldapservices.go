@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
 	"github.com/Macmod/flashingestor/config"
@@ -24,16 +25,12 @@ func (rc *RemoteCollector) collectLdapServices(ctx context.Context, targetHost s
 	hasLdaps, _ := checkPortOpen(ctx, dialer, targetHost, 636)
 	result.HasLdaps = hasLdaps
 
-	// TODO: Implement ldapsigning check somehow.
-	// 		 strongerAuthRequired error?
-	/*
-		if result.HasLdap {
-			result.IsSigningRequired.Collected = true
+	if result.HasLdap {
+		result.IsSigningRequired.Collected = true
 
-			resultCheck := checkSigningRequired(ctx, targetHost, rc.auth)
-			result.IsSigningRequired.Result = &resultCheck
-		}
-	*/
+		resultCheck := checkSigningRequired(ctx, targetHost, rc.auth)
+		result.IsSigningRequired.Result = &resultCheck
+	}
 
 	if result.HasLdaps {
 		result.IsChannelBindingRequired.Collected = true
@@ -73,27 +70,25 @@ func checkChannelBindingRequired(ctx context.Context, host string, auth *config.
 	// Test the connection
 	conn, err := ldapauth.ConnectTo(ctx, creds, target, &options)
 	if err != nil {
-		// False positives could arise here
-		// if the credential is wrong, the account is locked out,
-		// server is unreachable, etc.
-		// TODO: Differentiate these cases somehow
-		return true
+		// Error code for missing channel bindings
+		if strings.Contains(err.Error(), "data 80090346") {
+			return true
+		}
 	}
 	defer conn.Close()
 
 	return false
 }
 
-/*
 func checkSigningRequired(ctx context.Context, host string, auth *config.CredentialMgr) bool {
 	// Currently there's no option to disable signing
-	// as it's not implemented yet in adauth
-	// So we just try to connect normally
+	// as it's [not implemented yet] in adauth
+	// [In theory] we just have to try to connect normally
 	options := ldapauth.Options{
-		Scheme:  "ldap",
-		Timeout: config.PORTCHECK_TIMEOUT,
-		KerberosDialer:        auth.Dialer(config.KERBEROS_TIMEOUT),
-		LDAPDialer:            auth.Dialer(config.PORTCHECK_TIMEOUT),
+		Scheme:         "ldap",
+		Timeout:        config.PORTCHECK_TIMEOUT,
+		KerberosDialer: auth.Dialer(config.KERBEROS_TIMEOUT),
+		LDAPDialer:     auth.Dialer(config.PORTCHECK_TIMEOUT),
 	}
 
 	creds := auth.Creds()
@@ -102,16 +97,11 @@ func checkSigningRequired(ctx context.Context, host string, auth *config.Credent
 	// Test the connection
 	conn, err := ldapauth.ConnectTo(ctx, creds, target, &options)
 	if err != nil {
-		// False positives could arise here
-		// if the credential is wrong, the account is locked out,
-		// server is unreachable, etc.
-		// TODO: Differentiate these cases somehow
-		fmt.Fprintf(os.Stderr, "[DEBUG] Signing required check failed: %v\n", err)
-		return true
+		if strings.Contains(err.Error(), "Strong Auth Required") {
+			return true
+		}
 	}
 	defer conn.Close()
 
-	fmt.Fprintf(os.Stderr, "[DEBUG] Signing required check ok:\n")
 	return false
 }
-*/

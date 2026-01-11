@@ -42,6 +42,9 @@ func parseTrust(flags int, direction int) (string, string, bool, bool, bool) {
 	// instead of Bloodhoundpy to ensure consistency
 	trustTypeStr := "Unknown"
 	if hasFlag(flags, "WITHIN_FOREST") {
+		// Sometimes it's TreeRoot, but it shouldn't matter,
+		// as SharpHound itself doesn't distinguish between them.
+		// To dinstinguish them we would need to check the domain names.
 		trustTypeStr = "ParentChild"
 	} else if hasFlag(flags, "FOREST_TRANSITIVE") {
 		trustTypeStr = "Forest"
