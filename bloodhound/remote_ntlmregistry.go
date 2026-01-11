@@ -39,7 +39,7 @@ func parseRegistryMultiString(valBytes []byte) []string {
 	return strings
 }
 
-// collectNTLMSettings retrieves NTLM authentication configuration from a target system's registry
+// collectNTLMRegistryData retrieves NTLM authentication configuration from a target system's registry
 func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHost string) builder.NTLMRegistryData {
 	result := builder.NTLMRegistryData{
 		APIResult: builder.APIResult{

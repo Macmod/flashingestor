@@ -8,7 +8,7 @@ import (
 	"github.com/Macmod/flashingestor/msrpc"
 )
 
-// collectRegistrySessions retrieves user sessions from the registry ProfileList on a target system
+// collectSmbInfo retrieves SMB signing information from a target system via RPC
 func (rc *RemoteCollector) collectSmbInfo(ctx context.Context, targetHost string) builder.SMBInfoAPIResult {
 	result := builder.SMBInfoAPIResult{
 		APIResult: builder.APIResult{Collected: false},

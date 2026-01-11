@@ -152,7 +152,7 @@ Contributions are welcome by [opening an issue](https://github.com/Macmod/flashi
 * `GPOChanges` collection is not implemented for `Domain` / `OrganizationalUnit` types.
 * `Status` collections are not implemented for the `Computer` type. `SmbInfo` is still a basic implementation (registry checks only).
 * `HttpEnrollmentEndpoints` only works with a provided username/password.
-* `AllowedToDelegateTo` / `ServicePrincipalNames` resolution is still a basic implementation
+* `AllowedToDelegateTo` / `ServicePrincipalNames` resolution is still a basic implementation.
 * `ldapsigning` is not collected for DC `Computer` objects; `ldapsepa` is prone to false positives.
 
 ## General
