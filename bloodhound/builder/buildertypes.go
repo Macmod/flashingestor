@@ -315,6 +315,7 @@ type Computer struct {
 	NTLMRegistryData        NTLMRegistryData            `json:"NTLMRegistryData"`
 	IsWebClientRunning      IsWebClientRunningAPIResult `json:"IsWebClientRunning"`
 	IsDC                    bool                        `json:"IsDC"`
+	SMBInfo                 *SMBInfoAPIResult           `json:"SMBInfo"`
 }
 
 type ComputerProperties struct {
@@ -500,9 +501,13 @@ type NTLMRegistryData struct {
 	Result NTLMRegistryValues
 }
 
+type SMBInfo struct {
+	SigningEnabled bool `json:"SigningEnabled"`
+}
+
 type SMBInfoAPIResult struct {
 	APIResult
-	Result map[string]string
+	Result SMBInfo
 }
 
 type DCRegistryData struct {

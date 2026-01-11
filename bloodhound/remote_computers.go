@@ -27,6 +27,7 @@ type RemoteCollectionResult struct {
 	UserRights         []builder.UserRightsAPIResult       `json:"UserRights"`
 	IsWebClientRunning builder.IsWebClientRunningAPIResult `json:"IsWebClientRunning"`
 	LdapServices       builder.LdapServicesResult          `json:"LdapServices"`
+	SMBInfo            *builder.SMBInfoAPIResult           `json:"SMBInfo"`
 }
 
 func (rcr *RemoteCollectionResult) StoreInComputer(computer *builder.Computer) {
@@ -37,6 +38,7 @@ func (rcr *RemoteCollectionResult) StoreInComputer(computer *builder.Computer) {
 	computer.NTLMRegistryData = rcr.NTLMRegistryData
 	computer.UserRights = rcr.UserRights
 	computer.IsWebClientRunning = rcr.IsWebClientRunning
+	computer.SMBInfo = rcr.SMBInfo
 
 	if computer.IsDC {
 		computer.DCRegistryData = rcr.DCRegistryData
@@ -104,6 +106,13 @@ func (rc *RemoteCollector) CollectRemoteComputer(ctx context.Context, target Col
 		//stepStart = time.Now()
 		result.IsWebClientRunning = rc.collectIsWebClientRunning(ctx, target.IPAddress)
 		//fmt.Fprintf(os.Stderr, "   ⏱️  webclient took %s\n", time.Since(stepStart).Round(time.Millisecond))
+	}
+	if rc.RuntimeOptions.IsMethodEnabled("smbinfo") {
+		//fmt.Fprintf(os.Stderr, "🛠️  [blue]Collecting SMB info data from %s (%s)[-]\n", target.DNSHostName, target.IPAddress)
+		//stepStart = time.Now()
+		smbInfo := rc.collectSmbInfo(ctx, target.IPAddress)
+		result.SMBInfo = &smbInfo
+		//fmt.Fprintf(os.Stderr, "   ⏱️  smbinfo took %s\n", time.Since(stepStart).Round(time.Millisecond))
 	}
 
 	if target.IsDC {

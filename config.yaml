@@ -180,6 +180,7 @@ remote_collection:
     - webclient
     - localgroups
     - ldapservices 
+    - smbinfo
 
 # Conversion Settings
 conversion:
