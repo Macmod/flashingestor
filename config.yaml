@@ -181,8 +181,15 @@ remote_collection:
     - localgroups
     - ldapservices
     - smbinfo
-  skip_password_age_check: false
-  skip_port_scan: false
+
+  # Availability checks to run before remote collection
+  # Available checks: windows_os, password_age, smb_port_scan
+  # If omitted or set to empty list [], no checks will run (all computers pass)
+  # To enable checks, explicitly list them:
+  availability_checks:
+    - windows_os
+    - password_age
+    - smb_port_scan
 
 # Conversion Settings
 conversion:
