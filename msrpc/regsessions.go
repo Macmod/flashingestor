@@ -35,6 +35,18 @@ func (m *WinregRPC) GetSessionsFromRegistry(ctx context.Context) ([]string, erro
 			LastWriteTime: nil,
 		})
 
+		if err != nil {
+			// We could continue here, but for now it's better to stop at
+			// unknown errors
+			return sids, fmt.Errorf("BaseRegEnumKey failed: %w", err)
+		}
+
+		if resp == nil || resp.NameOut == nil {
+			// We could continue here, but for now it's better to stop at
+			// unknown errors
+			return sids, fmt.Errorf("BaseRegEnumKey returned an empty response")
+		}
+
 		result := resp.NameOut.Buffer
 		if sidRegex.MatchString(result) {
 			sids = append(sids, resp.NameOut.Buffer)
