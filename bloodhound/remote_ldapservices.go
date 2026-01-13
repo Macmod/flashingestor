@@ -100,6 +100,7 @@ func checkSigningRequired(ctx context.Context, host string, auth *config.Credent
 		if strings.Contains(err.Error(), "Strong Auth Required") {
 			return true
 		}
+		return false
 	}
 	defer conn.Close()
 
