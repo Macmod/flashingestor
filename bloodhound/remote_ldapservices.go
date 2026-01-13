@@ -74,6 +74,7 @@ func checkChannelBindingRequired(ctx context.Context, host string, auth *config.
 		if strings.Contains(err.Error(), "data 80090346") {
 			return true
 		}
+		return false
 	}
 	defer conn.Close()
 
