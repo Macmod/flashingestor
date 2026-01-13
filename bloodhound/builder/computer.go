@@ -43,7 +43,7 @@ func BuildComputerFromEntry(entry *gildap.LDAPEntry) (*Computer, bool) {
 	uac := entry.GetUAC()
 
 	lastLogonTimestampStr := entry.GetAttrVal("lastLogonTimestamp", "0")
-	lastLogonTimestamp := formatTime2(lastLogonTimestampStr)
+	lastLogonTimestamp := gildap.FormatTime2(lastLogonTimestampStr)
 	if lastLogonTimestampStr == "0" {
 		lastLogonTimestamp = int64(-1)
 	}
@@ -91,9 +91,9 @@ func BuildComputerFromEntry(entry *gildap.LDAPEntry) (*Computer, bool) {
 		UserAccountControl:       int64(uac),
 		ObjectGUID:               entry.GetGUID(),
 		HasLAPS:                  entry.HasLAPS(),
-		LastLogon:                formatTime2(entry.GetAttrVal("lastLogon", "0")),
+		LastLogon:                gildap.FormatTime2(entry.GetAttrVal("lastLogon", "0")),
 		LastLogonTimestamp:       lastLogonTimestamp,
-		PwdLastSet:               formatTime2(entry.GetAttrVal("pwdLastSet", "0")),
+		PwdLastSet:               gildap.FormatTime2(entry.GetAttrVal("pwdLastSet", "0")),
 		ServicePrincipalNames:    spns,
 		OperatingSystem:          operatingSystem,
 		SIDHistory:               entry.GetAttrVals("sIDHistory", []string{}),

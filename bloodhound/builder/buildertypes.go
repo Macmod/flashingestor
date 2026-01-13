@@ -114,7 +114,7 @@ func (bp *BaseProperties) FromEntry(entry *gildap.LDAPEntry) {
 	if whenCreatedStr == "" {
 		bp.WhenCreated = 0
 	} else {
-		bp.WhenCreated = formatTime1(whenCreatedStr)
+		bp.WhenCreated = gildap.FormatTime1(whenCreatedStr)
 	}
 }
 
@@ -308,7 +308,7 @@ type Computer struct {
 	RegistrySessions        SessionAPIResult            `json:"RegistrySessions"`
 	Properties              ComputerProperties          `json:"Properties"`
 	HasSIDHistory           []TypedPrincipal            `json:"HasSIDHistory"`
-	Status                  ComputerStatus              `json:"Status"` // TODO: Fill
+	Status                  ComputerStatus              `json:"Status"`
 	UserRights              []UserRightsAPIResult       `json:"UserRights"`
 	DumpSMSAPassword        []TypedPrincipal            `json:"DumpSMSAPassword"`
 	DCRegistryData          DCRegistryData              `json:"DCRegistryData"`

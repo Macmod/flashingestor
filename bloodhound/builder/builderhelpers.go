@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -150,36 +149,6 @@ func parseGPLinkString(linkStr string) []GPLink {
 		results = append(results, GPLink{DN: dn, Option: opt})
 	}
 	return results
-}
-
-// Converts time in format 20060102150405.0Z into Unix epoch seconds.
-func formatTime1(whenCreatedStr string) int64 {
-	var whenCreatedEpoch int64
-	if whenCreatedStr != "" {
-		t, err := time.Parse("20060102150405.0Z", whenCreatedStr)
-		if err == nil {
-			whenCreatedEpoch = t.Unix()
-		}
-	}
-
-	return whenCreatedEpoch
-}
-
-// Converts a Windows FILETIME to Unix epoch seconds.
-func formatTime2(fileTimeStr string) int64 {
-	if fileTimeStr == "" {
-		return 0
-	}
-
-	// Active Directory timestamps are in 100-nanosecond intervals since Jan 1, 1601.
-	var ft int64
-	_, err := fmt.Sscan(fileTimeStr, &ft)
-	if err != nil || ft == 0 {
-		return 0
-	}
-	// Convert: subtract epoch difference and divide by 10,000,000 to get seconds.
-	unixTime := (ft / 10000000) - 11644473600
-	return unixTime
 }
 
 func capitalize(s string) string {

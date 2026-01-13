@@ -84,7 +84,7 @@ func BuildDomainFromEntry(domainEntry *gildap.LDAPEntry, trustEntries []gildap.L
 
 	// --- When created ---
 	whenCreatedStr := domainEntry.GetAttrVal("whenCreated", "")
-	whenCreated := formatTime1(whenCreatedStr)
+	whenCreated := gildap.FormatTime1(whenCreatedStr)
 
 	// Domain name and SID
 	domainName := domainEntry.GetDomainFromDN()
