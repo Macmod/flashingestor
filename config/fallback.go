@@ -5,10 +5,10 @@ func FallbackOptions() *RuntimeOptions {
 	opts := &RuntimeOptions{}
 
 	// Ingestion defaults
-	opts.Ingestion.RecurseTrusts = true
+	opts.Ingestion.RecurseTrusts = false
 	opts.Ingestion.RecurseFeasibleOnly = true
 	opts.Ingestion.IncludeACLs = true
-	opts.Ingestion.SearchForest = true
+	opts.Ingestion.SearchForest = false
 	opts.Ingestion.LdapsToLdapFallback = true
 	opts.Ingestion.PromptMsgpackOverwrite = true
 	opts.Ingestion.AppendForestDomains = true

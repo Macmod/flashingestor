@@ -4,9 +4,9 @@ common:
 # LDAP Ingestion Settings
 ingestion:
   include_acls: true
-  recurse_trusts: true
+  recurse_trusts: false
   recurse_feasible_only: true
-  search_forest: true 
+  search_forest: false
   ldaps_to_ldap_fallback: true
   prompt_msgpack_overwrite: true
   append_forest_domains: true
@@ -181,6 +181,8 @@ remote_collection:
     - localgroups
     - ldapservices
     - smbinfo
+  skip_password_age_check: false
+  skip_port_scan: false
 
 # Conversion Settings
 conversion:
