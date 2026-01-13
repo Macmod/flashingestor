@@ -146,6 +146,13 @@ func FallbackOptions() *RuntimeOptions {
 		"localgroups",
 	}
 
+	// Availability checks defaults
+	opts.RemoteCollection.AvailabilityChecks = []string{
+		"windows_os",
+		"password_age",
+		// "smb_port_scan",
+	}
+
 	// Conversion defaults
 	opts.Conversion.MergeRemote = true
 	opts.Conversion.WriterBufsize = 33554432 // 32MB

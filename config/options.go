@@ -36,7 +36,8 @@ type RuntimeOptions struct {
 	} `yaml:"ingestion"`
 
 	RemoteCollection struct {
-		Methods []string `yaml:"methods"`
+		Methods            []string `yaml:"methods"`
+		AvailabilityChecks []string `yaml:"availability_checks"`
 	} `yaml:"remote_collection"`
 
 	Conversion struct {
@@ -203,6 +204,23 @@ func (opts *RuntimeOptions) GetEnabledMethods() []string {
 	return methods
 }
 
+// GetAvailabilityChecks returns a map of availability checks to run
+// Returns empty map if not configured (meaning no checks run)
+func (opts *RuntimeOptions) GetAvailabilityChecks() map[string]bool {
+	opts.mu.RLock()
+	defer opts.mu.RUnlock()
+	// If omitted from YAML, return empty map (no checks)
+	if opts.RemoteCollection.AvailabilityChecks == nil {
+		return make(map[string]bool)
+	}
+	// Convert slice to map for efficient lookup
+	checks := make(map[string]bool, len(opts.RemoteCollection.AvailabilityChecks))
+	for _, check := range opts.RemoteCollection.AvailabilityChecks {
+		checks[check] = true
+	}
+	return checks
+}
+
 // Thread-safe setters
 func (opts *RuntimeOptions) SetVerbose(level int) {
 	opts.mu.Lock()
@@ -268,4 +286,10 @@ func (opts *RuntimeOptions) SetCleanupAfterCompression(enabled bool) {
 	opts.mu.Lock()
 	defer opts.mu.Unlock()
 	opts.Conversion.CleanupAfterCompression = enabled
+}
+
+func (opts *RuntimeOptions) SetAvailabilityChecks(checks []string) {
+	opts.mu.Lock()
+	defer opts.mu.Unlock()
+	opts.RemoteCollection.AvailabilityChecks = checks
 }

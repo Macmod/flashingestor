@@ -104,13 +104,13 @@ func (app *Application) SetRunning(running bool, operationName string) {
 		var statusText string
 		switch operationName {
 		case "ingestion":
-			statusText = " [blue]LDAP Ingestion in progress...[-]"
+			statusText = " [blue]LDAP ingestion in progress...[-]"
 			app.SwitchToPage("ingest")
 		case "conversion":
-			statusText = " [blue]BloodHound Conversion in progress...[-]"
+			statusText = " [blue]BloodHound conversion in progress...[-]"
 			app.SwitchToPage("conversion")
 		case "remote":
-			statusText = " [blue]Remote Collection in progress...[-]"
+			statusText = " [blue]Remote collection in progress...[-]"
 			app.SwitchToPage("remote")
 		}
 
