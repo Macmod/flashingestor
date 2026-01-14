@@ -27,9 +27,9 @@ func (app *Application) SwitchToPage(pageName string) {
 func (app *Application) UpdateLog(message string) {
 	currentTime := time.Now()
 	formattedTime := currentTime.Format("2006-01-02 15:04:05")
-	fmt.Fprintf(app.logPanel, "[white][%s][-] %s\n", formattedTime, message)
 
 	go app.QueueUpdateDraw(func() {
+		fmt.Fprintf(app.logPanel, "[white][%s][-] %s\n", formattedTime, message)
 		app.logPanel.ScrollToEnd()
 	})
 }

@@ -168,15 +168,15 @@ func (s *Spinner) updateSpinners() {
 	spin := SpinnerFrames[spinIdx%len(SpinnerFrames)]
 	status := fmt.Sprintf("[blue]%s Running", spin)
 
-	for domain, domainRows := range s.runningRows {
-		table, ok := s.tables[domain]
-		if !ok {
-			continue
+	s.app.QueueUpdateDraw(func() {
+		for domain, domainRows := range s.runningRows {
+			table, ok := s.tables[domain]
+			if !ok {
+				continue
+			}
+			for row := range domainRows {
+				table.GetCell(row, s.statusColumn).SetText(status)
+			}
 		}
-		for row := range domainRows {
-			table.GetCell(row, s.statusColumn).SetText(status)
-		}
-	}
-
-	s.app.Draw()
+	})
 }
