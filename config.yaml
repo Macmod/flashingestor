@@ -1,15 +1,52 @@
 common:
+  # Verbosity can be set to either:
+  # NORMAL - 0
+  # VERBOSE - 1
+  # DEBUG - 2
   verbose: 0
 
 # LDAP Ingestion Settings
 ingestion:
+  # If include ACLs is set to false, then the nTSecurityDescriptor will not be
+  # fetched in queries (even if they list it explicitly), and ACLs will not be filled in the end.
+  # This is usually bad, as ACL abuse paths won't be interpreted from the dump,
+  # but there could be reasons for disabling it (evasion etc).
   include_acls: true
+  # If recurse_trusts is set to true, it'll try to ingest
+  # any trusted domains found recursively with the initial credential
+  # provided for ingestion.
   recurse_trusts: false
+  # The recurse_feasible_only option only applies when recurse_trusts is
+  # true. In that case, it'll only try to
+  # ingest a trusted domain if the trust is
+  # (1) inbound/bidirectional and
+  # (2) either involves the initial domain, or is transitive
   recurse_feasible_only: true
+  # If search_forest is set to true, it'll try to ingest domains that are 
+  # part of the same forest as the initial domain from the Configuration partition.
+  # Both options can be set at the same time, and flashingestor will only ingest any domain found once
+  # (either via a trust, or via the current forest).
   search_forest: false
+  # If connecting via the LDAPS port (636) doesn't work,
+  # fall back to plain LDAP (386).
   ldaps_to_ldap_fallback: true
+  # Prompt for confirmation when overwriting msgpack files
+  # in ingestion / remote collection
   prompt_msgpack_overwrite: true
+  # Append newly discovered domain<->forest mappings 
+  # to output/ldap/ForestDomains.json instead of
+  # overwriting
   append_forest_domains: true
+  # The default queries specified below are designed with
+  # information needed by Bloodhound conversion in mind.
+  #
+  # You may choose to customize queries or attributes,
+  # but it's best to try to avoid removing needed attributes,
+  # and to avoid changing the meaning of the search filters, as
+  # it could lead to collection issues.
+  #
+  # Changing the page size is also possible - it doesn't matter much
+  # usually, but it could be useful when in slow/problematic networks.
   queries:
     - name: Configuration
       filter: "(objectClass=*)"
@@ -168,6 +205,11 @@ ingestion:
 
 # Remote Collection Settings
 remote_collection:
+  # These methods roughly correspond to the methods of SharpHound
+  # Valid options are:
+  #   userrights, dcregistry, sessions, regsessions, loggedon,
+  #   ntlmregistry, caregistry, certservices, webclient, localgroups,
+  #   ldapservices, smbinfo
   methods:
     - userrights
     - dcregistry
@@ -183,17 +225,30 @@ remote_collection:
     - smbinfo
 
   # Availability checks to run before remote collection
-  # Available checks: windows_os, password_age, smb_port_scan
-  # If omitted or set to empty list [], no checks will run (all computers pass)
+  # (not yet implemented)
+  #  
+  # Available checks:
+  #   windows_os - Only run remote collection on Windows computers
+  #   password_age - Only run remote collection on
+  #                  computers with recent values (last 60 days)
+  #                  in either pwdLastSet or lastLogonTimestamp
+  #   smb_port_scan - Only run remote collection on computers with port 445 open
+  # If omitted, no checks will run (all computers pass)
   # To enable checks, explicitly list them:
   availability_checks:
     - windows_os
     - password_age
-    - smb_port_scan
+    # Disabled by default as it adds the additional delay
+    # of checking port 445 on all computers
+    # - smb_port_scan
 
 # Conversion Settings
 conversion:
-  merge_remote: true       # Merge remote results into ingested data if they exist
-  writer_bufsize: 33554432 # 32MB buffer
-  compress_output: true    # Compress JSON output files
-  cleanup_after_compression: true # Whether to remove the individual files after compression
+  # Merge remote results into ingested data if they exist:
+  merge_remote: true
+  # Size of the memory buffer for writing JSON output files:
+  writer_bufsize: 33554432
+  # Compress JSON output files in the end of conversion:
+  compress_output: true
+  # Whether to remove the individual files after compression:
+  cleanup_after_compression: true
