@@ -16,8 +16,14 @@ func (m *WinregRPC) GetRegistrySigningRequired() (bool, bool, error) {
 	const requireValueName = "RequireSecuritySignature"
 	const enableValueName = "EnableSecuritySignature"
 
+	// Open HKLM once and reuse for both queries
+	hiveHandle, err := m.OpenLocalMachine()
+	if err != nil {
+		return false, false, fmt.Errorf("OpenLocalMachine failed: %w", err)
+	}
+
 	// Try to get RequireSecuritySignature
-	requireBytes, requireErr := m.GetRegistryKeyData(keyPath, requireValueName)
+	requireBytes, requireErr := m.QueryRegistryValue(hiveHandle, keyPath, requireValueName)
 
 	// If RequireSecuritySignature exists, use its value
 	if requireErr == nil && len(requireBytes) >= 4 {
@@ -26,7 +32,7 @@ func (m *WinregRPC) GetRegistrySigningRequired() (bool, bool, error) {
 	}
 
 	// RequireSecuritySignature doesn't exist, check EnableSecuritySignature
-	enableBytes, enableErr := m.GetRegistryKeyData(keyPath, enableValueName)
+	enableBytes, enableErr := m.QueryRegistryValue(hiveHandle, keyPath, enableValueName)
 
 	if enableErr == nil && len(enableBytes) >= 4 {
 		enabled := binary.LittleEndian.Uint32(enableBytes) != 0

@@ -19,8 +19,15 @@ func (rc *RemoteCollector) collectDCRegistryData(ctx context.Context, targetHost
 	}
 	defer mrpcObj.Close()
 
+	// Open HKLM once and reuse for all queries
+	hiveHandle, err := mrpcObj.OpenLocalMachine()
+	if err != nil {
+		return result
+	}
+
 	// CertificateMappingMethods
-	valCMMBytes, err := mrpcObj.GetRegistryKeyData(
+	valCMMBytes, err := mrpcObj.QueryRegistryValue(
+		hiveHandle,
 		"SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\Schannel",
 		"CertificateMappingMethods",
 	)
@@ -48,7 +55,8 @@ func (rc *RemoteCollector) collectDCRegistryData(ctx context.Context, targetHost
 	}
 
 	// StrongCertificateBindingEnforcement
-	valSCBEBytes, err := mrpcObj.GetRegistryKeyData(
+	valSCBEBytes, err := mrpcObj.QueryRegistryValue(
+		hiveHandle,
 		"SYSTEM\\CurrentControlSet\\Services\\Kdc",
 		"StrongCertificateBindingEnforcement",
 	)
@@ -77,7 +85,8 @@ func (rc *RemoteCollector) collectDCRegistryData(ctx context.Context, targetHost
 	}
 
 	// VulnerableChannelAllowList
-	valVCALBytes, err := mrpcObj.GetRegistryKeyData(
+	valVCALBytes, err := mrpcObj.QueryRegistryValue(
+		hiveHandle,
 		"SYSTEM\\CurrentControlSet\\Services\\Netlogon\\Parameters",
 		"VulnerableChannelAllowList",
 	)

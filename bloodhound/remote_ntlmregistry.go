@@ -56,8 +56,18 @@ func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHo
 	}
 	defer mrpcObj.Close()
 
+	// Open HKLM once and reuse for all queries
+	hiveHandle, err := mrpcObj.OpenLocalMachine()
+	if err != nil {
+		errStr := fmt.Sprintf("OpenLocalMachine failed: %v", err)
+		result.APIResult.Collected = false
+		result.APIResult.FailureReason = &errStr
+		return result
+	}
+
 	// ClientAllowedNTLMServers - REG_MULTI_SZ
-	valBytes, err := mrpcObj.GetRegistryKeyData(
+	valBytes, err := mrpcObj.QueryRegistryValue(
+		hiveHandle,
 		"SYSTEM\\CurrentControlSet\\Control\\Lsa\\MSV1_0",
 		"ClientAllowedNTLMServers",
 	)
@@ -66,12 +76,13 @@ func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHo
 	} else {
 		/*
 			No error handling currently
-			errStr := fmt.Sprintf("GetRegistryKeyData failed: %v", err)
+			errStr := fmt.Sprintf("QueryRegistryValue failed: %v", err)
 		*/
 	}
 
 	// NtlmMinClientSec - REG_DWORD
-	valBytes, err = mrpcObj.GetRegistryKeyData(
+	valBytes, err = mrpcObj.QueryRegistryValue(
+		hiveHandle,
 		"SYSTEM\\CurrentControlSet\\Control\\Lsa\\MSV1_0",
 		"NtlmMinClientSec",
 	)
@@ -83,12 +94,13 @@ func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHo
 	} else {
 		/*
 			No error handling currently
-			errStr := fmt.Sprintf("GetRegistryKeyData failed: %v", err)
+			errStr := fmt.Sprintf("QueryRegistryValue failed: %v", err)
 		*/
 	}
 
 	// NtlmMinServerSec - REG_DWORD
-	valBytes, err = mrpcObj.GetRegistryKeyData(
+	valBytes, err = mrpcObj.QueryRegistryValue(
+		hiveHandle,
 		"SYSTEM\\CurrentControlSet\\Control\\Lsa\\MSV1_0",
 		"NtlmMinServerSec",
 	)
@@ -100,12 +112,13 @@ func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHo
 	} else {
 		/*
 			No error handling currently
-			errStr := fmt.Sprintf("GetRegistryKeyData failed: %v", err)
+			errStr := fmt.Sprintf("QueryRegistryValue failed: %v", err)
 		*/
 	}
 
 	// RestrictReceivingNTLMTraffic - REG_DWORD
-	valBytes, err = mrpcObj.GetRegistryKeyData(
+	valBytes, err = mrpcObj.QueryRegistryValue(
+		hiveHandle,
 		"SYSTEM\\CurrentControlSet\\Control\\Lsa\\MSV1_0",
 		"RestrictReceivingNTLMTraffic",
 	)
@@ -117,12 +130,13 @@ func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHo
 	} else {
 		/*
 			No error handling currently
-			errStr := fmt.Sprintf("GetRegistryKeyData failed: %v", err)
+			errStr := fmt.Sprintf("QueryRegistryValue failed: %v", err)
 		*/
 	}
 
 	// RestrictSendingNTLMTraffic - REG_DWORD
-	valBytes, err = mrpcObj.GetRegistryKeyData(
+	valBytes, err = mrpcObj.QueryRegistryValue(
+		hiveHandle,
 		"SYSTEM\\CurrentControlSet\\Control\\Lsa\\MSV1_0",
 		"RestrictSendingNTLMTraffic",
 	)
@@ -134,12 +148,13 @@ func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHo
 	} else {
 		/*
 			No error handling currently
-			errStr := fmt.Sprintf("GetRegistryKeyData failed: %v", err)
+			errStr := fmt.Sprintf("QueryRegistryValue failed: %v", err)
 		*/
 	}
 
 	// LMCompatibilityLevel - REG_DWORD
-	valBytes, err = mrpcObj.GetRegistryKeyData(
+	valBytes, err = mrpcObj.QueryRegistryValue(
+		hiveHandle,
 		"SYSTEM\\CurrentControlSet\\Control\\Lsa",
 		"LMCompatibilityLevel",
 	)
@@ -151,12 +166,13 @@ func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHo
 	} else {
 		/*
 			No error handling currently
-			errStr := fmt.Sprintf("GetRegistryKeyData failed: %v", err)
+			errStr := fmt.Sprintf("QueryRegistryValue failed: %v", err)
 		*/
 	}
 
 	// UseMachineId - REG_DWORD
-	valBytes, err = mrpcObj.GetRegistryKeyData(
+	valBytes, err = mrpcObj.QueryRegistryValue(
+		hiveHandle,
 		"SYSTEM\\CurrentControlSet\\Control\\Lsa",
 		"UseMachineId",
 	)
@@ -168,12 +184,13 @@ func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHo
 	} else {
 		/*
 			No error handling currently
-			errStr := fmt.Sprintf("GetRegistryKeyData failed: %v", err)
+			errStr := fmt.Sprintf("QueryRegistryValue failed: %v", err)
 		*/
 	}
 
 	// EnableSecuritySignature - REG_DWORD
-	valBytes, err = mrpcObj.GetRegistryKeyData(
+	valBytes, err = mrpcObj.QueryRegistryValue(
+		hiveHandle,
 		"SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters",
 		"EnableSecuritySignature",
 	)
@@ -185,12 +202,13 @@ func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHo
 	} else {
 		/*
 			No error handling currently
-			errStr := fmt.Sprintf("GetRegistryKeyData failed: %v", err)
+			errStr := fmt.Sprintf("QueryRegistryValue failed: %v", err)
 		*/
 	}
 
 	// RequireSecuritySignature - REG_DWORD
-	valBytes, err = mrpcObj.GetRegistryKeyData(
+	valBytes, err = mrpcObj.QueryRegistryValue(
+		hiveHandle,
 		"SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters",
 		"RequireSecuritySignature",
 	)
@@ -202,7 +220,7 @@ func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHo
 	} else {
 		/*
 			No error handling currently
-			errStr := fmt.Sprintf("GetRegistryKeyData failed: %v", err)
+			errStr := fmt.Sprintf("QueryRegistryValue failed: %v", err)
 		*/
 	}
 
