@@ -7,6 +7,14 @@ import (
 	"github.com/Macmod/flashingestor/config"
 )
 
+// padSpeed pads a speed string to 8 characters for consistent table width
+func padSpeed(speed string) string {
+	if len(speed) < 8 {
+		return fmt.Sprintf("%-8s", speed)
+	}
+	return speed
+}
+
 // SwitchToPage switches between the progress tracker pages
 func (app *Application) SwitchToPage(pageName string) {
 	app.currentPage = pageName

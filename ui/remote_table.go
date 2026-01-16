@@ -75,7 +75,7 @@ func (app *Application) UpdateRemoteCollectionRow(row int, status, processed, pe
 		app.remoteCollectPage.SetCell(row, 3, tview.NewTableCell(percent))
 	}
 	if speed != "" {
-		app.remoteCollectPage.SetCell(row, 4, tview.NewTableCell(speed))
+		app.remoteCollectPage.SetCell(row, 4, tview.NewTableCell(padSpeed(speed)))
 	}
 	if avgSpeed != "" {
 		app.remoteCollectPage.SetCell(row, 5, tview.NewTableCell(avgSpeed))

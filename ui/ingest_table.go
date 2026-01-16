@@ -53,7 +53,7 @@ func (app *Application) UpdateIngestRow(domainName string, row int, status, requ
 		table.SetCell(row, 3, tview.NewTableCell(entries))
 	}
 	if speed != "" {
-		table.SetCell(row, 4, tview.NewTableCell(speed))
+		table.SetCell(row, 4, tview.NewTableCell(padSpeed(speed)))
 	}
 	if avgSpeed != "" {
 		table.SetCell(row, 5, tview.NewTableCell(avgSpeed))

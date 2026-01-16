@@ -67,7 +67,7 @@ func (app *Application) UpdateConversionRow(row int, status, processed, percent,
 		app.conversionPage.SetCell(row, 3, tview.NewTableCell(percent))
 	}
 	if speed != "" {
-		app.conversionPage.SetCell(row, 4, tview.NewTableCell(speed))
+		app.conversionPage.SetCell(row, 4, tview.NewTableCell(padSpeed(speed)))
 	}
 	if avgSpeed != "" {
 		app.conversionPage.SetCell(row, 5, tview.NewTableCell(avgSpeed))
