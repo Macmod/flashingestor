@@ -12,31 +12,38 @@ ingestion:
   # This is usually bad, as ACL abuse paths won't be interpreted from the dump,
   # but there could be reasons for disabling it (evasion etc).
   include_acls: true
+
   # If recurse_trusts is set to true, it'll try to ingest
   # any trusted domains found recursively with the initial credential
   # provided for ingestion.
   recurse_trusts: false
+
   # The recurse_feasible_only option only applies when recurse_trusts is
   # true. In that case, it'll only try to
   # ingest a trusted domain if the trust is
   # (1) inbound/bidirectional and
   # (2) either involves the initial domain, or is transitive
   recurse_feasible_only: true
+
   # If search_forest is set to true, it'll try to ingest domains that are 
   # part of the same forest as the initial domain from the Configuration partition.
   # Both options can be set at the same time, and flashingestor will only ingest any domain found once
   # (either via a trust, or via the current forest).
   search_forest: false
+
   # If connecting via the LDAPS port (636) doesn't work,
   # fall back to plain LDAP (386).
   ldaps_to_ldap_fallback: true
+
   # Prompt for confirmation when overwriting msgpack files
   # in ingestion / remote collection
   prompt_msgpack_overwrite: true
+
   # Append newly discovered domain<->forest mappings 
   # to output/ldap/ForestDomains.json instead of
   # overwriting
   append_forest_domains: true
+
   # The default queries specified below are designed with
   # information needed by Bloodhound conversion in mind.
   #
@@ -246,9 +253,12 @@ remote_collection:
 conversion:
   # Merge remote results into ingested data if they exist:
   merge_remote: true
+
   # Size of the memory buffer for writing JSON output files:
   writer_bufsize: 33554432
+
   # Compress JSON output files in the end of conversion:
   compress_output: true
+
   # Whether to remove the individual files after compression:
   cleanup_after_compression: true
