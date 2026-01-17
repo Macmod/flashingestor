@@ -17,7 +17,7 @@
 
 The main goals of this project are:
 
-1. Be a **full data ingestor** compatible with BloodHound CE
+1. Be a **full data ingestor** compatible with BloodHound CE (Community Edition)
 2. Be faster, less noisy, and more customizable than other collectors
 3. Be a friendly TUI (terminal user interface) with progress tracking
 
@@ -145,7 +145,7 @@ Contributions are welcome by [opening an issue](https://github.com/Macmod/flashi
 
 ## Ingestion
 
-* `recurse_trusts` / `search_forest` only automatically authenticate to LDAP in other discovered domains with the specified credentials from the source domain when the provided authentication material is either a `plain password` or an `NT hash`; using a TGT to issue a referral ticket for this purpose is theoretically possible but [not yet implemented](https://github.com/RedTeamPentesting/adauth) in the `adauth` library.
+* `recurse_trusts` / `search_forest` only automatically authenticate to LDAP in other discovered domains with the specified credentials from the source domain when the provided authentication material is either a `plain password` or an `NT hash`; using a TGT to issue a referral ticket for this purpose is theoretically possible but [not yet implemented](https://github.com/RedTeamPentesting/adauth/issues/6) in the `adauth` library.
 
 ## Remote Collection
 
