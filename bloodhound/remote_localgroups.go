@@ -62,6 +62,9 @@ func (rc *RemoteCollector) ProcessLocalGroupMembers(ctx context.Context, localMe
 	results := []builder.TypedPrincipal{}
 	names := []builder.NamedPrincipal{}
 
+	// Lazy-initialize RPC object only when needed, reuse for all lookups
+	var rpcObj *msrpc.LsatRPC
+
 	for _, memberSid := range localMembers {
 		if isSidFiltered(memberSid) {
 			continue
@@ -99,13 +102,17 @@ func (rc *RemoteCollector) ProcessLocalGroupMembers(ctx context.Context, localMe
 
 		// If the security identifier starts with the machine sid, we need to resolve it as a local object
 		if strings.HasPrefix(memberSid, machineSid+"-") {
-			newSid := fmt.Sprintf("%s-%s", machineSid, getRID(memberSid))
-
-			rpcObj, err := msrpc.NewLsatRPC(ctx, machineHost, rc.auth)
-			if err != nil {
-				continue
+			// Create RPC connection on first use
+			if rpcObj == nil {
+				var err error
+				rpcObj, err = msrpc.NewLsatRPC(ctx, machineHost, rc.auth)
+				if err != nil {
+					// Failed to create RPC connection, skip all local SID lookups
+					continue
+				}
 			}
-			defer rpcObj.Close()
+
+			newSid := fmt.Sprintf("%s-%s", machineSid, getRID(memberSid))
 
 			resolvedSids, err := rpcObj.LookupSids([]string{memberSid})
 			if err != nil || len(resolvedSids) != 1 {
@@ -147,6 +154,11 @@ func (rc *RemoteCollector) ProcessLocalGroupMembers(ctx context.Context, localMe
 		if ok {
 			results = append(results, resolvedPrincipal)
 		}
+	}
+
+	// Close RPC connection if it was created
+	if rpcObj != nil {
+		rpcObj.Close()
 	}
 
 	return results, names

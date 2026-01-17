@@ -47,6 +47,9 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 
 	results := []builder.UserRightsAPIResult{}
 
+	// Lazy-initialize RPC object only when needed, reuse for all lookups across all privileges
+	var lsatObj *msrpc.LsatRPC
+
 	for privilege, principals := range userRights {
 		result := builder.UserRightsAPIResult{
 			APIResult: builder.APIResult{
@@ -94,14 +97,17 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 			}
 
 			if machineSid != "" && strings.HasPrefix(principalSid, machineSid+"-") {
-				newSid := fmt.Sprintf("%s-%s", machineSid, getRID(principalSid))
-
-				// Need LsatRPC for SID lookup
-				lsatObj, err := msrpc.NewLsatRPC(ctx, targetIp, rc.auth)
-				if err != nil {
-					continue
+				// Create RPC connection on first use
+				if lsatObj == nil {
+					var err error
+					lsatObj, err = msrpc.NewLsatRPC(ctx, targetIp, rc.auth)
+					if err != nil {
+						// Failed to create RPC connection, skip all local SID lookups
+						continue
+					}
 				}
-				defer lsatObj.Close()
+
+				newSid := fmt.Sprintf("%s-%s", machineSid, getRID(principalSid))
 
 				resolvedSids, err := lsatObj.LookupSids([]string{principalSid})
 				if err != nil || len(resolvedSids) != 1 {
@@ -146,6 +152,11 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 		}
 
 		results = append(results, result)
+	}
+
+	// Close RPC connection if it was created
+	if lsatObj != nil {
+		lsatObj.Close()
 	}
 
 	return results
