@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"slices"
 	"strings"
@@ -17,7 +19,7 @@ import (
 )
 
 var (
-	version = "0.1.0"
+	version = "0.2.0"
 )
 
 // Application entry point
@@ -41,13 +43,7 @@ func main() {
 
 	jobManager := newJobManager()
 
-	logChannel := make(chan core.LogMessage)
-	logFunc := func(format string, args ...interface{}) {
-		logChannel <- core.LogMessage{Message: fmt.Sprintf(format, args...), Level: 0}
-	}
-	logVerbose := func(format string, args ...interface{}) {
-		logChannel <- core.LogMessage{Message: fmt.Sprintf(format, args...), Level: 1}
-	}
+	logChannel := make(chan core.LogMessage, cfg.RemoteWorkers*2)
 
 	var logFile *os.File
 	if cfg.LogFile != "" {
@@ -59,58 +55,71 @@ func main() {
 	}
 
 	verboseLevel := cfg.RuntimeOptions.GetVerbose()
-	logger := core.NewLogger(logChannel, logFile, uiApp, verboseLevel)
+	logger := core.NewLogger(logChannel, logFile, uiApp.UpdateLog, verboseLevel)
 	go logger.Start()
 
-	logFunc("🧩 Welcome to FlashIngestor " + version)
-	logFunc("⭕ [blue]Config file[-]: " + cfg.ConfigPath)
-	logFunc("⭕ [blue]Output folder[-]: " + cfg.OutputDir)
+	logger.Log0("🧩 Welcome to FlashIngestor " + version)
+
+	// Start pprof HTTP server for profiling if enabled
+	if cfg.PprofEnabled {
+		go func() {
+			if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+				logger.Log0("❌ [red]Pprof server error:[-] %v", err)
+			}
+		}()
+	}
+	if cfg.PprofEnabled {
+		logger.Log0("🔬 [blue]Pprof profiling enabled:[-] http://localhost:6060/debug/pprof/")
+	}
+	logger.Log0("⭕ [blue]Config file[-]: " + cfg.ConfigPath)
+	logger.Log0("⭕ [blue]Output folder[-]: " + cfg.OutputDir)
 
 	resolver := cfg.Resolver
 	customDNS := cfg.CustomDns
 	if customDNS != "" {
 		if cfg.DnsTcp {
-			logFunc("🔍 [blue]DNS protocol[-]: TCP")
+			logger.Log0("🔍 [blue]DNS protocol[-]: TCP")
 		} else {
-			logFunc("🔍 [blue]DNS protocol[-]: UDP")
+			logger.Log0("🔍 [blue]DNS protocol[-]: UDP")
 		}
 
-		logFunc("🔍 [blue]Custom DNS resolver[-]: \"" + customDNS + "\"")
+		logger.Log0("🔍 [blue]Custom DNS resolver[-]: \"" + customDNS + "\"")
 	}
 
-	logFunc("⭕ [blue]LDAP scheme[-]: " + cfg.LdapAuthOptions.Scheme)
+	logger.Log0("⭕ [blue]LDAP scheme[-]: " + cfg.LdapAuthOptions.Scheme)
 
 	// Check if we have authentication credentials
 	disableIngest := false
 	if cfg.ChosenAuthIngest == "" {
 		disableIngest = true
-		logFunc("🫠 [red]No authentication credentials detected for ingestion. Ingestion will be disabled for this session.[-]")
+		logger.Log0("🫠 [red]No authentication credentials detected for ingestion. Ingestion will be disabled for this session.[-]")
 	}
 
 	disableRemote := cfg.ChosenAuthIngest == "" && cfg.ChosenAuthRemote == ""
 	if disableRemote {
-		logFunc("🫠 [red]No authentication credentials detected for remote collection. Remote collection will be disabled for this session.[-]")
+		logger.Log0("🫠 [red]No authentication credentials detected for remote collection. Remote collection will be disabled for this session.[-]")
 	}
 
 	bhInst := &bloodhound.BH{}
 	bhInst.Init(
 		dirs.LDAP, dirs.Remote, dirs.BloodHound, resolver,
-		cfg.RemoteWorkers, cfg.DNSWorkers, cfg.RemoteTimeout, cfg.RuntimeOptions,
-		logChannel,
+		cfg.RemoteWorkers, cfg.DNSWorkers,
+		cfg.RemoteComputerTimeout, cfg.RemoteMethodTimeout,
+		cfg.RuntimeOptions, logger,
 	)
 
 	// Use RemoteAuthOptions for remote collection, fallback to StandardAuthOptions if not set
 	if cfg.ChosenAuthIngest == "" {
-		logFunc("🔗 [blue]Auth method (ingestion)[-]: None")
+		logger.Log0("🔗 [blue]Auth method (ingestion)[-]: None")
 	} else {
-		logFunc("🔗 [blue]Auth method (ingestion)[-]: " + cfg.ChosenAuthIngest)
+		logger.Log0("🔗 [blue]Auth method (ingestion)[-]: " + cfg.ChosenAuthIngest)
 	}
 
 	if cfg.RuntimeOptions.GetRecurseTrusts() {
 		if !slices.Contains([]string{"Password", "NTHash", "Anonymous"}, cfg.ChosenAuthIngest) || cfg.IngestAuth.Kerberos() {
 			// Kerberos cross-realm auth should be feasible to implement,
 			// but I don't know how yet :)
-			logFunc("🫠 [yellow]RecurseTrusts disabled (not supported for this auth method)[-]")
+			logger.Log0("🫠 [yellow]RecurseTrusts disabled (not supported for this auth method)[-]")
 			cfg.RuntimeOptions.SetRecurseTrusts(false)
 		}
 	}
@@ -122,8 +131,7 @@ func main() {
 		resolver:            resolver,
 		queryDefs:           cfg.RuntimeOptions.GetQueries(),
 		ldapFolder:          dirs.LDAP,
-		logFunc:             logFunc,
-		logVerbose:          logVerbose,
+		logger:              logger,
 		uiApp:               uiApp,
 		processedDomains:    &sync.Map{},
 		includeACLs:         cfg.RuntimeOptions.GetIncludeACLs(),
@@ -134,20 +142,20 @@ func main() {
 		appendForestDomains: cfg.RuntimeOptions.GetAppendForestDomains(),
 	}
 
-	conversionMgr := newConversionManager(bhInst, logFunc)
-	remoteMgr := newRemoteCollectionManager(bhInst, cfg.RemoteAuth, logFunc)
+	conversionMgr := newConversionManager(bhInst, logger)
+	remoteMgr := newRemoteCollectionManager(bhInst, cfg.RemoteAuth, logger)
 
 	if cfg.ChosenAuthRemote == "" {
-		logFunc("🔗 [blue]Auth method (remote collection)[-]: None")
+		logger.Log0("🔗 [blue]Auth method (remote collection)[-]: None")
 	} else {
-		logFunc("🔗 [blue]Auth method (remote collection)[-]: " + cfg.ChosenAuthRemote)
+		logger.Log0("🔗 [blue]Auth method (remote collection)[-]: " + cfg.ChosenAuthRemote)
 	}
 
 	// Temporary restriction until a better solution is implemented
 	// TODO: Allow for NTHash too?
 	if cfg.RuntimeOptions.IsMethodEnabled("certservices") {
 		if cfg.ChosenAuthRemote != "Password" {
-			logFunc("🫠 [yellow]CertServices disabled (not supported for this auth method)[-]")
+			logger.Log0("🫠 [yellow]CertServices disabled (not supported for this auth method)[-]")
 			cfg.RuntimeOptions.DisableMethod("certservices")
 		}
 	}
@@ -156,15 +164,15 @@ func main() {
 	if !disableIngest {
 		initialDomain = strings.ToUpper(cfg.IngestAuth.Creds().Domain)
 		if initialDomain == "" {
-			logFunc("❌ [red]Failed to determine initial domain for ingestion from the credentials. Check your credentials and try again.\n")
+			logger.Log0("❌ [red]Failed to determine initial domain for ingestion from the credentials. Check your credentials and try again.\n")
 		} else {
-			logFunc("🔗 [blue]Initial domain[-]: \"%s\"", initialDomain)
+			logger.Log0("🔗 [blue]Initial domain[-]: \"%s\"", initialDomain)
 
 			initialBaseDN = "DC=" + strings.ReplaceAll(initialDomain, ".", ",DC=")
-			logFunc("🔗 [blue]Inferred BaseDN[-]: \"%s\"", initialBaseDN)
+			logger.Log0("🔗 [blue]Inferred BaseDN[-]: \"%s\"", initialBaseDN)
 
 			initialDC = cfg.DomainController
-			logFunc("🔗 [blue]Initial DC[-]: \"%s\"", initialDC)
+			logger.Log0("🔗 [blue]Initial DC[-]: \"%s\"", initialDC)
 		}
 	}
 
@@ -177,7 +185,7 @@ func main() {
 				// Check if any msgpack files exist
 				hasFiles, err := ingestMgr.checkMsgpackFilesExist()
 				if err != nil {
-					logFunc("🫠 [yellow]Warning: Failed to check for existing msgpack files: %v[-]", err)
+					logger.Log0("🫠 [yellow]Warning: Failed to check for existing msgpack files: %v[-]", err)
 				} else if hasFiles {
 					// Show modal asking user if they want to overwrite
 					uiApp.ShowYesNoModal(
@@ -186,7 +194,10 @@ func main() {
 						func() {
 							// User chose Yes - proceed with ingestion
 							// Reset ingested domains tracker for new run
-							ingestMgr.processedDomains = &sync.Map{}
+							ingestMgr.processedDomains.Range(func(key, value interface{}) bool {
+								ingestMgr.processedDomains.Delete(key)
+								return true
+							})
 
 							// Mark initial domain as processed
 							ingestMgr.processedDomains.Store(strings.ToUpper(initialDomain), true)
@@ -196,7 +207,7 @@ func main() {
 						},
 						func() {
 							// User chose No - cancel ingestion
-							logFunc("🛑 [yellow]Ingestion cancelled by user (existing files will not be overwritten)[-]")
+							logger.Log0("🛑 [yellow]Ingestion cancelled by user (existing files will not be overwritten)[-]")
 						},
 					)
 					return
@@ -222,7 +233,7 @@ func main() {
 				// Check if any msgpack files exist
 				hasFiles, err := remoteMgr.checkMsgpackFilesExist()
 				if err != nil {
-					logFunc("🫠 [yellow]Warning: Failed to check for existing msgpack files: %v[-]", err)
+					logger.Log0("🫠 [yellow]Warning: Failed to check for existing msgpack files: %v[-]", err)
 				} else if hasFiles {
 					// Show modal asking user if they want to overwrite
 					uiApp.ShowYesNoModal(
@@ -234,7 +245,7 @@ func main() {
 						},
 						func() {
 							// User chose No - cancel remote collection
-							logFunc("🛑 [yellow]Remote collection cancelled by user (existing files will not be overwritten)[-]")
+							logger.Log0("🛑 [yellow]Remote collection cancelled by user (existing files will not be overwritten)[-]")
 						},
 					)
 					return
@@ -255,7 +266,7 @@ func main() {
 		func() {
 			// Clear cache callback
 			builder.BState().Clear()
-			logFunc("✅ [green]Cache cleared from memory. RemoteCollect/Convert steps will reload it from disk.[-]")
+			logger.Log0("✅ [green]Cache cleared from memory. RemoteCollect/Convert steps will reload it from disk.[-]")
 		},
 	)
 

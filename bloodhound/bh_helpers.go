@@ -13,6 +13,37 @@ import (
 	"github.com/Macmod/flashingestor/msrpc"
 )
 
+// formatMethodTimes creates a colored string showing timing for each collection method
+func formatMethodTimes(methodTimes map[string]time.Duration) string {
+	// Define method order for consistent output
+	methodOrder := []string{
+		"localgroups", "loggedon", "sessions",
+		"regsessions", "ntlmregistry", "userrights",
+		"webclient", "smbinfo", "dcregistry",
+		"ldapservices", "certservices", "caregistry",
+	}
+
+	result := "{"
+	first := true
+	for _, method := range methodOrder {
+		duration, exists := methodTimes[method]
+		if !exists {
+			continue
+		}
+		if !first {
+			result += ", "
+		}
+		color := "[green]"
+		if duration >= time.Second {
+			color = "[red]"
+		}
+		result += "[blue]" + method + "[-]: " + color + duration.Round(time.Millisecond).String() + "[-]"
+		first = false
+	}
+	result += "}"
+	return result
+}
+
 // formatFileSize converts a byte count to a human-readable size string (KB, MB, GB, TB)
 func formatFileSize(bytes int64) string {
 	const unit = 1024

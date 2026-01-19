@@ -62,7 +62,7 @@ func (s *Spinner) Start() {
 	s.mutex.Unlock()
 
 	go func() {
-		ticker := time.NewTicker(200 * time.Millisecond)
+		ticker := time.NewTicker(300 * time.Millisecond)
 		defer ticker.Stop()
 
 		for {
@@ -168,7 +168,8 @@ func (s *Spinner) updateSpinners() {
 	spin := SpinnerFrames[spinIdx%len(SpinnerFrames)]
 	status := fmt.Sprintf("[blue]%s Running", spin)
 
-	s.app.QueueUpdateDraw(func() {
+	// Use QueueUpdate to update table cells, then RequestDraw for throttled redraw
+	s.app.QueueUpdate(func() {
 		for domain, domainRows := range s.runningRows {
 			table, ok := s.tables[domain]
 			if !ok {
@@ -178,5 +179,6 @@ func (s *Spinner) updateSpinners() {
 				table.GetCell(row, s.statusColumn).SetText(status)
 			}
 		}
+		s.app.RequestDraw()
 	})
 }

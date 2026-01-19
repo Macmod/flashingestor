@@ -96,61 +96,57 @@ func (app *Application) ShowYesNoModal(title, message string, onYes func(), onNo
 }
 
 // SetRunning enables or disables all buttons based on whether an operation is running
+// NOTE: This can be called from either main goroutine (event handlers) or background goroutines.
 func (app *Application) SetRunning(running bool, operationName string) {
-	app.isRunning = running
+	// Use QueueUpdate to ensure thread-safety - it's safe from any goroutine
+	app.QueueUpdate(func() {
+		app.isRunning = running
 
-	if running {
-		// Update status text
-		var statusText string
-		switch operationName {
-		case "ingestion":
-			statusText = " [blue]LDAP ingestion in progress...[-]"
-			app.SwitchToPage("ingest")
-		case "conversion":
-			statusText = " [blue]BloodHound conversion in progress...[-]"
-			app.SwitchToPage("conversion")
-		case "remote":
-			statusText = " [blue]Remote collection in progress...[-]"
-			app.SwitchToPage("remote")
+		if running {
+			// Update status text
+			var statusText string
+			switch operationName {
+			case "ingestion":
+				statusText = " [blue]LDAP ingestion in progress...[-]"
+				app.SwitchToPage("ingest")
+			case "conversion":
+				statusText = " [blue]BloodHound conversion in progress...[-]"
+				app.SwitchToPage("conversion")
+			case "remote":
+				statusText = " [blue]Remote collection in progress...[-]"
+				app.SwitchToPage("remote")
+			}
+
+			// Update status panel text
+			statusTextView := app.statusPanel.GetItem(0).(*tview.TextView)
+			statusTextView.SetText(statusText)
+
+			// Rebuild root flex with status panel
+			app.statusPanel.SetBorder(true).SetBorderColor(tcell.ColorWhite)
+
+			// Build root flex
+			app.rootFlex = tview.NewFlex().SetDirection(tview.FlexRow).
+				AddItem(app.statusPanel, 3, 0, false).
+				AddItem(app.progressTracker, 15, 0, false).
+				AddItem(app.logPanel, 0, 1, false)
+
+			app.rootFlex.SetTitle("FlashIngestor").
+				SetBorder(true).
+				SetBorderColor(tcell.ColorWhite)
+
+			app.mainPages.AddAndSwitchToPage("main", app.rootFlex, true)
+		} else {
+			// Rebuild root flex with button panel
+			app.rootFlex = tview.NewFlex().SetDirection(tview.FlexRow).
+				AddItem(app.buttonPanel, 3, 0, false).
+				AddItem(app.progressTracker, 15, 0, false).
+				AddItem(app.logPanel, 0, 1, false)
+
+			app.rootFlex.SetTitle("FlashIngestor").
+				SetBorder(true).
+				SetBorderColor(tcell.ColorWhite)
+
+			app.mainPages.AddAndSwitchToPage("main", app.rootFlex, true)
 		}
-
-		// Update status panel text
-		statusTextView := app.statusPanel.GetItem(0).(*tview.TextView)
-		statusTextView.SetText(statusText)
-
-		// Rebuild root flex with status panel
-		app.statusPanel.SetBorder(true).SetBorderColor(tcell.ColorWhite)
-		/*
-			app.statusPanel.
-				SetFocusFunc(func() {
-					app.statusPanel.SetBorderColor(tcell.ColorBlue)
-				}).
-				SetBlurFunc(func() {
-					app.statusPanel.SetBorderColor(tcell.ColorWhite)
-				})
-		*/
-
-		app.rootFlex = tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(app.statusPanel, 3, 0, false).
-			AddItem(app.progressTracker, 15, 0, false).
-			AddItem(app.logPanel, 0, 1, false)
-
-		app.rootFlex.SetTitle("FlashIngestor").
-			SetBorder(true).
-			SetBorderColor(tcell.ColorWhite)
-
-		app.mainPages.AddAndSwitchToPage("main", app.rootFlex, true)
-	} else {
-		// Rebuild root flex with button panel
-		app.rootFlex = tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(app.buttonPanel, 3, 0, false).
-			AddItem(app.progressTracker, 15, 0, false).
-			AddItem(app.logPanel, 0, 1, false)
-
-		app.rootFlex.SetTitle("FlashIngestor").
-			SetBorder(true).
-			SetBorderColor(tcell.ColorWhite)
-
-		app.mainPages.AddAndSwitchToPage("main", app.rootFlex, true)
-	}
+	})
 }

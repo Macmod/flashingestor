@@ -7,9 +7,6 @@ output/
 *.dll
 *.so
 *.dylib
-flashingestor
-dcprobe
-ingest2json
 
 # Test binaries
 *.test

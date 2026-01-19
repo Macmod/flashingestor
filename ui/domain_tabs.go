@@ -8,6 +8,7 @@ import (
 )
 
 // AddDomainTab creates a new tab for a domain's ingestion table
+// Called from background goroutines (ingestDomain), must use QueueUpdateDraw
 func (app *Application) AddDomainTab(domainName string) {
 	// Check if domain already exists
 	for _, domain := range app.activeDomains {
@@ -16,25 +17,27 @@ func (app *Application) AddDomainTab(domainName string) {
 		}
 	}
 
-	// Create new table for this domain
-	domainTable := tview.NewTable()
-	domainTable.SetBorder(false).
-		SetBorderColor(tcell.ColorWhite)
+	app.QueueUpdateDraw(func() {
+		// Create new table for this domain
+		domainTable := tview.NewTable()
+		domainTable.SetBorder(false).
+			SetBorderColor(tcell.ColorWhite)
 
-	// Add to maps and lists
-	app.ingestTables[domainName] = domainTable
-	app.activeDomains = append(app.activeDomains, domainName)
+		// Add to maps and lists
+		app.ingestTables[domainName] = domainTable
+		app.activeDomains = append(app.activeDomains, domainName)
 
-	// Add page for this domain
-	app.ingestPages.AddPage(domainName, domainTable, true, len(app.activeDomains) == 1)
+		// Add page for this domain
+		app.ingestPages.AddPage(domainName, domainTable, true, len(app.activeDomains) == 1)
 
-	// Set as active if it's the first domain
-	if len(app.activeDomains) == 1 {
-		app.activeIngestDomain = domainName
-	}
+		// Set as active if it's the first domain
+		if len(app.activeDomains) == 1 {
+			app.activeIngestDomain = domainName
+		}
 
-	// Update tab bar
-	app.updateDomainTabBar()
+		// Update tab bar
+		app.updateDomainTabBarLocked()
+	})
 }
 
 // GetDomainTable returns the table for a specific domain
@@ -42,8 +45,9 @@ func (app *Application) GetDomainTable(domainName string) *tview.Table {
 	return app.ingestTables[domainName]
 }
 
-// updateDomainTabBar updates the tab bar display with all active domains
-func (app *Application) updateDomainTabBar() {
+// updateDomainTabBarLocked updates the tab bar display with all active domains
+// MUST be called from within QueueUpdate/QueueUpdateDraw or from main goroutine only
+func (app *Application) updateDomainTabBarLocked() {
 	if len(app.activeDomains) == 0 {
 		app.ingestTabBar.SetText("")
 		return
@@ -64,6 +68,7 @@ func (app *Application) updateDomainTabBar() {
 }
 
 // SwitchToDomainTab switches to a specific domain's ingestion table
+// Called from background goroutines (ingestDomain), must use QueueUpdateDraw
 func (app *Application) SwitchToDomainTab(domainName string) {
 	// Check if domain exists
 	found := false
@@ -77,12 +82,15 @@ func (app *Application) SwitchToDomainTab(domainName string) {
 		return
 	}
 
-	app.activeIngestDomain = domainName
-	app.ingestPages.SwitchToPage(domainName)
-	app.updateDomainTabBar()
+	app.QueueUpdateDraw(func() {
+		app.activeIngestDomain = domainName
+		app.ingestPages.SwitchToPage(domainName)
+		app.updateDomainTabBarLocked()
+	})
 }
 
 // SwitchToNextDomainTab cycles to the next domain tab
+// Called from keyboard input handlers (main goroutine), can directly modify UI
 func (app *Application) SwitchToNextDomainTab() {
 	if len(app.activeDomains) == 0 {
 		return
@@ -99,7 +107,12 @@ func (app *Application) SwitchToNextDomainTab() {
 
 	// Switch to next domain (wrap around)
 	nextIndex := (currentIndex + 1) % len(app.activeDomains)
-	app.SwitchToDomainTab(app.activeDomains[nextIndex])
+	nextDomain := app.activeDomains[nextIndex]
+	
+	// Since this is called from input handler (main goroutine), directly modify UI
+	app.activeIngestDomain = nextDomain
+	app.ingestPages.SwitchToPage(nextDomain)
+	app.updateDomainTabBarLocked()
 }
 
 // handleTabClick processes mouse clicks on the domain tab bar
@@ -131,7 +144,10 @@ func (app *Application) handleTabClick(x int) {
 
 		// Check if click is within this tab's bounds
 		if x >= currentX && x < currentX+tabWidth {
-			app.SwitchToDomainTab(domain)
+			// Called from mouse handler (main goroutine), directly modify UI
+			app.activeIngestDomain = domain
+			app.ingestPages.SwitchToPage(domain)
+			app.updateDomainTabBarLocked()
 			return
 		}
 

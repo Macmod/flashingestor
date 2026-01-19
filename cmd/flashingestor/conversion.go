@@ -11,27 +11,26 @@ import (
 
 // ConversionManager handles BloodHound conversion.
 type ConversionManager struct {
-	bhInst  *bloodhound.BH
-	logFunc func(string, ...interface{})
+	bhInst *bloodhound.BH
+	logger *core.Logger
 }
 
 func newConversionManager(
 	bhInst *bloodhound.BH,
-	logFunc func(string, ...interface{}),
+	logger *core.Logger,
 ) *ConversionManager {
-	return &ConversionManager{bhInst: bhInst, logFunc: logFunc}
+	return &ConversionManager{bhInst: bhInst, logger: logger}
 }
 
 func (c *ConversionManager) start(uiApp *ui.Application) {
 	c.bhInst.ResetAbortFlag()
-	uiApp.SetRunning(true, "conversion")
 	uiApp.SetAbortCallback(func() {
 		if c.bhInst.RequestAbort() {
-			c.logFunc("🛑 [red]Abort requested for BloodHound conversion...[-]")
+			c.logger.Log0("🛑 [red]Abort requested for BloodHound conversion...[-]")
 		}
 	})
 
-	c.logFunc("🔀 [cyan]Starting BloodHound conversion...[-]")
+	c.logger.Log0("🔀 [cyan]Starting BloodHound conversion...[-]")
 
 	// Set up conversion table and spinner
 	uiApp.SetupConversionTable()
@@ -52,6 +51,8 @@ func (c *ConversionManager) start(uiApp *ui.Application) {
 	}()
 
 	go func() {
+		uiApp.SetRunning(true, "conversion")
+
 		defer func() {
 			spinner.Stop()
 			close(conversionUpdates)
@@ -65,9 +66,9 @@ func (c *ConversionManager) start(uiApp *ui.Application) {
 		processDuration := time.Since(processStartTime)
 
 		if c.bhInst.IsAborted() {
-			c.logFunc("🛑 [red]BloodHound conversion aborted after %s[-]", core.FormatDuration(processDuration))
+			c.logger.Log0("🛑 [red]BloodHound conversion aborted after %s[-]", core.FormatDuration(processDuration))
 		} else {
-			c.logFunc("✅ [green]BloodHound conversion completed in %s[-]", core.FormatDuration(processDuration))
+			c.logger.Log0("✅ [green]BloodHound conversion completed in %s[-]", core.FormatDuration(processDuration))
 
 		}
 		c.bhInst.ResetAbortFlag()

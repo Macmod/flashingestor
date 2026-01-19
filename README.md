@@ -150,13 +150,15 @@ Contributions are welcome by [opening an issue](https://github.com/Macmod/flashi
 ## Remote Collection
 
 * `GPOChanges` collection is not implemented for `Domain` / `OrganizationalUnit` types.
-* `Status` collections are not implemented for the `Computer` type. `SmbInfo` is still a basic implementation (registry checks only).
+* `SmbInfo` for the `Computer` type is still a basic implementation (registry checks only).
 * `HttpEnrollmentEndpoints` only works with a provided username/password.
 * `AllowedToDelegateTo` / `ServicePrincipalNames` resolution is still a basic implementation.
 
 ## General
 
 * Almost all properties implemented in SharpHound are supported, but there are many architectural differences between this tool and SharpHound, so don't expect the output to match the official implementation exactly (with exception of eventual bugs). Key differences may arise especially for the more complex implementations, such as remote collections via RPC and collections related to CA/certificate abuse.
+
+* Timeouts are still mostly static - SharpHound's implementation uses an [adaptive timeout](https://github.com/SpecterOps/SharpHoundCommon/blob/v4/src/CommonLib/AdaptiveTimeout.cs) (pretty clever!), but I haven't had time to study that yet. If needed, customize timeouts with the `--timeout`, `--computer-timeout` and `--method-timeout` options ([config/config.go](config/config.go) specifies other operation-specific timeouts).
 
 * Tests are currently not implemented and I have only tested a small subset of features manually.
 

@@ -3,7 +3,8 @@
 package ui
 
 import (
-	"fmt"
+	"sync/atomic"
+	"time"
 
 	"github.com/Macmod/flashingestor/config"
 	"github.com/gdamore/tcell/v2"
@@ -40,16 +41,24 @@ type Application struct {
 	remoteCollectionCb func()
 	clearCacheCb       func()
 	runtimeOptions     *config.RuntimeOptions // Runtime configuration options
+
+	// Throttled update mechanism
+	pendingUpdate  atomic.Bool   // Whether a UI update is pending
+	updateTicker   *time.Ticker  // Ticker for throttling updates
+	updateStopChan chan struct{} // Channel to stop the update goroutine
 }
 
 // NewApplication creates a new UI application instance
 func NewApplication() *Application {
 	app := &Application{
-		Application:   tview.NewApplication(),
-		ingestTables:  make(map[string]*tview.Table),
-		activeDomains: make([]string, 0),
+		Application:    tview.NewApplication(),
+		ingestTables:   make(map[string]*tview.Table),
+		activeDomains:  make([]string, 0),
+		updateTicker:   time.NewTicker(300 * time.Millisecond),
+		updateStopChan: make(chan struct{}),
 	}
 	app.setupUI()
+	app.startThrottledUpdates()
 	return app
 }
 
@@ -83,9 +92,6 @@ func (app *Application) setupUI() {
 	app.ingestTabBar.SetDynamicColors(true).
 		SetTextAlign(tview.AlignLeft)
 
-	app.ingestTabBar.SetHighlightedFunc(func(added, removed, remaining []string) {
-		app.UpdateLog(fmt.Sprintf("%v %v %v", added, removed, remaining))
-	})
 	// Add mouse click handler for domain tab switching
 	app.ingestTabBar.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
 		if action == tview.MouseLeftClick {
@@ -291,4 +297,31 @@ func (app *Application) setupUI() {
 
 	app.rootFlex = appFlex
 	app.SetRoot(app.mainPages, true).EnableMouse(true)
+}
+
+// startThrottledUpdates starts the background goroutine that throttles UI updates
+func (app *Application) startThrottledUpdates() {
+	go func() {
+		for {
+			select {
+			case <-app.updateStopChan:
+				return
+			case <-app.updateTicker.C:
+				if app.pendingUpdate.CompareAndSwap(true, false) {
+					app.Draw()
+				}
+			}
+		}
+	}()
+}
+
+// RequestDraw requests a UI redraw in a throttled manner
+func (app *Application) RequestDraw() {
+	app.pendingUpdate.Store(true)
+}
+
+// StopThrottledUpdates stops the throttled update mechanism
+func (app *Application) StopThrottledUpdates() {
+	app.updateTicker.Stop()
+	close(app.updateStopChan)
 }

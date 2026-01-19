@@ -14,20 +14,20 @@ import (
 
 // RemoteCollectionManager handles remote data collection.
 type RemoteCollectionManager struct {
-	bhInst  *bloodhound.BH
-	auth    *config.CredentialMgr
-	logFunc func(string, ...interface{})
+	bhInst *bloodhound.BH
+	auth   *config.CredentialMgr
+	logger *core.Logger
 }
 
 func newRemoteCollectionManager(
 	bhInst *bloodhound.BH,
 	auth *config.CredentialMgr,
-	logFunc func(string, ...interface{}),
+	logger *core.Logger,
 ) *RemoteCollectionManager {
 	return &RemoteCollectionManager{
-		bhInst:  bhInst,
-		auth:    auth,
-		logFunc: logFunc,
+		bhInst: bhInst,
+		auth:   auth,
+		logger: logger,
 	}
 }
 
@@ -53,14 +53,13 @@ func (r *RemoteCollectionManager) checkMsgpackFilesExist() (bool, error) {
 
 func (r *RemoteCollectionManager) start(uiApp *ui.Application) {
 	r.bhInst.ResetAbortFlag()
-	uiApp.SetRunning(true, "remote")
 	uiApp.SetAbortCallback(func() {
 		if r.bhInst.RequestAbort() {
-			r.logFunc("🛑 [red]Abort requested for remote collection...[-]")
+			r.logger.Log0("🛑 [red]Abort requested for remote collection...[-]")
 		}
 	})
 
-	r.logFunc("💻 [cyan]Starting remote collection...[-]")
+	r.logger.Log0("💻 [cyan]Starting remote collection...[-]")
 
 	// Create remote collection updates channel
 	remoteUpdates := make(chan core.RemoteCollectionUpdate, 1000)
@@ -77,6 +76,8 @@ func (r *RemoteCollectionManager) start(uiApp *ui.Application) {
 	go r.handleRemoteCollectionUpdates(remoteUpdates, spinner, uiApp)
 
 	go func() {
+		uiApp.SetRunning(true, "remote")
+
 		defer func() {
 			close(remoteUpdates)
 			spinner.Stop()
@@ -89,9 +90,9 @@ func (r *RemoteCollectionManager) start(uiApp *ui.Application) {
 		processDuration := time.Since(processStartTime)
 
 		if r.bhInst.IsAborted() {
-			r.logFunc("🛑 [red]Remote collection aborted after %s. Results may be incomplete.[-]", core.FormatDuration(processDuration))
+			r.logger.Log0("🛑 [red]Remote collection aborted after %s. Results may be incomplete.[-]", core.FormatDuration(processDuration))
 		} else {
-			r.logFunc("✅ [green]Remote collection completed in %s[-]", core.FormatDuration(processDuration))
+			r.logger.Log0("✅ [green]Remote collection completed in %s[-]", core.FormatDuration(processDuration))
 		}
 	}()
 }

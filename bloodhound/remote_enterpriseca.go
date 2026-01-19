@@ -2,6 +2,7 @@ package bloodhound
 
 import (
 	"context"
+	"time"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
 	"github.com/Macmod/flashingestor/msrpc"
@@ -9,6 +10,7 @@ import (
 
 // EnterpriseCARemoteCollectionResult holds data collected remotely from a CA.
 type EnterpriseCARemoteCollectionResult struct {
+	GUID                    string                                  `json:"GUID"`
 	CARegistryData          builder.CARegistryData                  `json:"CARegistryData"`
 	HttpEnrollmentEndpoints []builder.CAEnrollmentEndpointAPIResult `json:"HttpEnrollmentEndpoints"`
 	HostingComputer         string                                  `json:"HostingComputer"`
@@ -37,13 +39,9 @@ func (rc *RemoteCollector) collectEnterpriseCARegistryData(ctx context.Context, 
 		return result
 	}
 
-	//fmt.Fprintf(os.Stderr, "RegEnrollPerms\n")
 	result.CASecurity = certAbuse.ProcessRegistryEnrollmentPermissions(ctx, caName, targetHostname, objectSid, targetDomain)
-	//fmt.Fprintf(os.Stderr, "ProcessEAPerms\n")
 	result.EnrollmentAgentRestrictions = certAbuse.ProcessEAPermissions(ctx, caName, targetHostname, objectSid, targetDomain)
-	//fmt.Fprintf(os.Stderr, "IsUserSpecifiesSanEnabled\n")
 	result.IsUserSpecifiesSanEnabled = certAbuse.IsUserSpecifiesSanEnabled(caName)
-	//fmt.Fprintf(os.Stderr, "IsRoleSeparationEnabled\n")
 	result.IsRoleSeparationEnabled = certAbuse.IsRoleSeparationEnabled(caName)
 
 	return result
@@ -59,10 +57,36 @@ func (rc *RemoteCollector) collectHttpEnrollmentEndpoints(ctx context.Context, c
 	return caEndpoints
 }
 
-func (rc *RemoteCollector) CollectRemoteEnterpriseCA(ctx context.Context, target EnterpriseCACollectionTarget) EnterpriseCARemoteCollectionResult {
-	result := EnterpriseCARemoteCollectionResult{}
+// CollectRemoteEnterpriseCAWithContext wraps CollectRemoteEnterpriseCA with hard timeout enforcement.
+func (rc *RemoteCollector) CollectRemoteEnterpriseCAWithContext(ctx context.Context, target EnterpriseCACollectionTarget) EnterpriseCARemoteCollectionResult {
+	resultCh := make(chan EnterpriseCARemoteCollectionResult, 1)
 
-	objectSid, ok := resolveHostname(ctx, rc.auth, target.DNSHostName, target.Domain)
+	go func() {
+		resultCh <- rc.CollectRemoteEnterpriseCA(target)
+	}()
+
+	select {
+	case result := <-resultCh:
+		return result
+	case <-ctx.Done():
+		rc.logger.Log1("[yellow](%s) CA aborted: %v[-]", target.DNSHostName, ctx.Err())
+		return EnterpriseCARemoteCollectionResult{}
+	}
+}
+
+func (rc *RemoteCollector) CollectRemoteEnterpriseCA(target EnterpriseCACollectionTarget) EnterpriseCARemoteCollectionResult {
+	totalStart := time.Now()
+
+	methodTimes := make(map[string]time.Duration)
+	result := EnterpriseCARemoteCollectionResult{
+		GUID: target.GUID,
+	}
+
+	var stepStart time.Time
+
+	resolveCtx, resolveCancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
+	objectSid, ok := resolveHostname(resolveCtx, rc.auth, target.DNSHostName, target.Domain)
+	resolveCancel()
 	if ok {
 		result.HostingComputer = objectSid
 	}
@@ -74,13 +98,25 @@ func (rc *RemoteCollector) CollectRemoteEnterpriseCA(ctx context.Context, target
 	}
 
 	if rc.RuntimeOptions.IsMethodEnabled("certservices") {
-		result.HttpEnrollmentEndpoints = rc.collectHttpEnrollmentEndpoints(ctx, target.CAName, targetHost)
+		stepStart = time.Now()
+		stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
+		result.HttpEnrollmentEndpoints = rc.collectHttpEnrollmentEndpoints(stepCtx, target.CAName, targetHost)
+		cancel()
+		methodTimes["certservices"] = time.Since(stepStart)
 	}
 
 	if rc.RuntimeOptions.IsMethodEnabled("caregistry") {
-		//fmt.Fprintf(os.Stderr, "[blue]🛠️  Collecting Enterprise CA registry data from %s (%s)[-]\n", target.DNSHostName, target.IPAddress)
-		result.CARegistryData = rc.collectEnterpriseCARegistryData(ctx, target.CAName, targetHost, objectSid, target.Domain)
-		//fmt.Fprintf(os.Stderr, "[blue]🛠️  Collecting HTTPEnrollmentEndpoints CA registry data from %s (%s)[-]\n", target.DNSHostName, target.IPAddress)
+		stepStart = time.Now()
+		stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
+		result.CARegistryData = rc.collectEnterpriseCARegistryData(stepCtx, target.CAName, targetHost, objectSid, target.Domain)
+		cancel()
+		methodTimes["caregistry"] = time.Since(stepStart)
+	}
+
+	// Log method times summary
+	if len(methodTimes) > 0 {
+		totalTime := time.Since(totalStart)
+		rc.logger.Log2("(%s) Total %s: %s", target.DNSHostName, totalTime.Round(time.Millisecond), formatMethodTimes(methodTimes))
 	}
 
 	return result

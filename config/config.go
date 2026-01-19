@@ -15,17 +15,19 @@ import (
 
 // Config holds all application configuration
 type Config struct {
-	DomainController string
-	OutputDir        string
-	LogFile          string
-	RemoteWorkers    int
-	DNSWorkers       int
-	RemoteTimeout    time.Duration
-	CustomDns        string
-	DnsTcp           bool
-	ConfigPath       string
-	LdapAuthOptions  *ldapauth.Options
-	RuntimeOptions   *RuntimeOptions
+	DomainController      string
+	OutputDir             string
+	LogFile               string
+	RemoteWorkers         int
+	DNSWorkers            int
+	RemoteComputerTimeout time.Duration
+	RemoteMethodTimeout   time.Duration
+	CustomDns             string
+	DnsTcp                bool
+	ConfigPath            string
+	PprofEnabled          bool
+	LdapAuthOptions       *ldapauth.Options
+	RuntimeOptions        *RuntimeOptions
 
 	IngestAuth       *CredentialMgr
 	RemoteAuth       *CredentialMgr
@@ -34,12 +36,14 @@ type Config struct {
 	Resolver         *net.Resolver
 }
 
-const DEFAULT_REMOTE_TIMEOUT = 3 * time.Second
+const DEFAULT_REMOTE_METHOD_TIMEOUT = 4 * time.Second
+const DEFAULT_REMOTE_COMPUTER_TIMEOUT = 10 * time.Second
 const DEFAULT_REMOTE_WORKERS = 50
 const DEFAULT_DNS_WORKERS = 10
 const DEFAULT_LDAP_TIMEOUT = 30 * time.Second
 const DEFAULT_LDAP_SCHEME = "ldaps"
 
+// Timeout constants for various network operations
 const PORTCHECK_TIMEOUT = 2 * time.Second   // Generic timeout for port checking
 const NETBIOS_TIMEOUT = 2 * time.Second     // Timeout for NetBIOS
 const HTTP_TIMEOUT = 3 * time.Second        // Timeout for HTTP
@@ -104,10 +108,12 @@ func ParseFlags() (*Config, error) {
 	pflag.StringVar(&config.ConfigPath, "config", "config.yaml", "Path to YAML config file (optional)")
 	pflag.StringVar(&config.CustomDns, "dns", "", "Custom DNS resolver to use")
 	pflag.BoolVar(&config.DnsTcp, "dns-tcp", false, "Use DNS over TCP instead of UDP")
+	pflag.BoolVar(&config.PprofEnabled, "pprof", false, "Enable pprof profiling server on http://localhost:6060")
 	pflag.StringVar(&config.DomainController, "dc", "", "Domain controller to use")
-	pflag.IntVar(&config.RemoteWorkers, "remote-workers", DEFAULT_REMOTE_WORKERS, "Number of concurrent workers for remote collection")
+	pflag.IntVarP(&config.RemoteWorkers, "remote-workers", "w", DEFAULT_REMOTE_WORKERS, "Number of concurrent workers for remote collection")
 	pflag.IntVar(&config.DNSWorkers, "dns-workers", DEFAULT_DNS_WORKERS, "Number of concurrent workers for DNS lookups")
-	pflag.DurationVar(&config.RemoteTimeout, "remote-timeout", DEFAULT_REMOTE_TIMEOUT, "Timeout per computer for remote collection")
+	pflag.DurationVar(&config.RemoteComputerTimeout, "computer-timeout", DEFAULT_REMOTE_COMPUTER_TIMEOUT, "Timeout per computer for remote collection")
+	pflag.DurationVar(&config.RemoteMethodTimeout, "method-timeout", DEFAULT_REMOTE_METHOD_TIMEOUT, "Timeout per method of remote collection")
 
 	// Register adauth flags for ingestion
 	standardAuthOptions := &adauth.Options{}

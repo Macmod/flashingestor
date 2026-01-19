@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -81,11 +82,21 @@ func (bh *BH) loadRemoteComputerResults() map[string]*RemoteCollectionResult {
 	}
 	defer file.Close()
 
-	var results map[string]*RemoteCollectionResult
 	decoder := msgpack.NewDecoder(file)
-	if err := decoder.Decode(&results); err != nil {
-		bh.log(" 🫠 [yellow]Warning: Could not decode remote computer results: %s[-]", err.Error())
-		return nil
+
+	results := make(map[string]*RemoteCollectionResult)
+	for {
+		var result RemoteCollectionResult
+		if err := decoder.Decode(&result); err != nil {
+			if err == io.EOF {
+				break
+			}
+			bh.log("🫠 [yellow]Could not decode remote computer result: %s[-]", err.Error())
+			continue
+		}
+		if result.SID != "" {
+			results[result.SID] = &result
+		}
 	}
 
 	if len(results) > 0 {
@@ -105,11 +116,21 @@ func (bh *BH) loadRemoteCAResults() map[string]*EnterpriseCARemoteCollectionResu
 	}
 	defer file.Close()
 
-	var results map[string]*EnterpriseCARemoteCollectionResult
 	decoder := msgpack.NewDecoder(file)
-	if err := decoder.Decode(&results); err != nil {
-		bh.log("🫠 [yellow]Warning: Could not decode remote CA results:[-] %v", err)
-		return nil
+
+	results := make(map[string]*EnterpriseCARemoteCollectionResult)
+	for {
+		var result EnterpriseCARemoteCollectionResult
+		if err := decoder.Decode(&result); err != nil {
+			if err == io.EOF {
+				break
+			}
+			bh.log("🫠 [yellow]Warning: Could not decode remote CA result:[-] %v", err)
+			continue
+		}
+		if result.GUID != "" {
+			results[result.GUID] = &result
+		}
 	}
 
 	if len(results) > 0 {
@@ -849,8 +870,8 @@ func (bh *BH) PerformConversion() {
 	abortLogged := false
 	notifyAbort := func(currentStep int) bool {
 		if bh.IsAborted() {
-			if !abortLogged && bh.Log != nil {
-				bh.log("🛑 Conversion abort requested. Stopping remaining steps...")
+			if !abortLogged {
+				bh.Logger.Log0("🛑 Conversion abort requested. Stopping remaining steps...")
 				abortLogged = true
 			}
 			// Mark remaining steps as skipped
@@ -945,6 +966,16 @@ func (bh *BH) PerformConversion() {
 	if bh.RuntimeOptions.GetCompressOutput() {
 		bh.runConversionStep(11, func() { bh.compressBloodhoundOutput(11) })
 	}
+
+	// Clear remote collection maps
+	bh.RemoteComputerCollection = nil
+	bh.RemoteEnterpriseCACollection = nil
+
+	// Clear writers map
+	bh.writers = nil
+
+	// Force garbage collection
+	runtime.GC()
 
 	if builder.BState().EmptySDCount > 0 {
 		bh.log("🫠 [yellow]Security descriptors were not present in %d entries. Permissions issue during ingestion?[-]", builder.BState().EmptySDCount)
@@ -1116,7 +1147,7 @@ func (bh *BH) loadConversionCache(step int) {
 		filePath := info.reader.GetPath()
 		bh.logVerbose("📦 Loading %s", filePath)
 
-		builder.BState().CacheEntries(info.reader, info.identifier, bh.Log, bh.IsAborted, progressCallback)
+		builder.BState().CacheEntries(info.reader, info.identifier, bh.Logger, bh.IsAborted, progressCallback)
 
 		// Mark this cache as loaded
 		builder.BState().MarkCacheLoaded(filePath)

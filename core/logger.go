@@ -4,32 +4,45 @@ import (
 	"fmt"
 	"os"
 	"time"
-
-	"github.com/Macmod/flashingestor/ui"
 )
 
 // LogMessage represents a log entry with level
 type LogMessage struct {
 	Message string
-	Level   int // 0 = normal, 1 = verbose
+	Level   int
 }
 
 // Logger handles message logging to both UI and file.
 type Logger struct {
 	channel      chan LogMessage
 	file         *os.File
-	uiApp        *ui.Application
+	logCallback  func(string)
 	verboseLevel int
 }
 
 // NewLogger creates a new logger instance.
-func NewLogger(channel chan LogMessage, file *os.File, uiApp *ui.Application, verboseLevel int) *Logger {
+func NewLogger(channel chan LogMessage, file *os.File, logCallback func(string), verboseLevel int) *Logger {
 	return &Logger{
 		channel:      channel,
 		file:         file,
-		uiApp:        uiApp,
+		logCallback:  logCallback,
 		verboseLevel: verboseLevel,
 	}
+}
+
+// Log0 sends a normal log message (level 0).
+func (l *Logger) Log0(format string, args ...interface{}) {
+	l.channel <- LogMessage{Message: fmt.Sprintf(format, args...), Level: 0}
+}
+
+// Log1 sends a verbose log message (level 1).
+func (l *Logger) Log1(format string, args ...interface{}) {
+	l.channel <- LogMessage{Message: fmt.Sprintf(format, args...), Level: 1}
+}
+
+// Log2 sends a debug log message (level 2).
+func (l *Logger) Log2(format string, args ...interface{}) {
+	l.channel <- LogMessage{Message: fmt.Sprintf(format, args...), Level: 2}
 }
 
 // Start begins processing log messages.
@@ -40,8 +53,10 @@ func (l *Logger) Start() {
 			continue
 		}
 
-		// Always update UI
-		l.uiApp.UpdateLog(logMsg.Message)
+		// Call callback if provided
+		if l.logCallback != nil {
+			l.logCallback(logMsg.Message)
+		}
 
 		// Write to log file if specified
 		if l.file != nil {

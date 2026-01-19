@@ -188,6 +188,16 @@ func (c *ParentChildCache) TotalChildren() int {
 	return total
 }
 
+// Clear removes all entries from the cache
+func (c *ParentChildCache) Clear() {
+	for i := range c.shards {
+		s := &c.shards[i]
+		s.mu.Lock()
+		s.m = make(map[uint64][]Entry)
+		s.mu.Unlock()
+	}
+}
+
 // StringCache is a concurrent sharded map keyed by xxhash64 of arbitrary strings.
 // Sharding avoids a global lock and improves write performance.
 type StringCache struct {
@@ -270,6 +280,16 @@ func (c *StringCache) Size() int {
 	return total
 }
 
+// Clear removes all entries from the cache
+func (c *StringCache) Clear() {
+	for i := range c.shards {
+		s := &c.shards[i]
+		s.mu.Lock()
+		s.m = make(map[uint64]Entry)
+		s.mu.Unlock()
+	}
+}
+
 // SimpleCache is a simple thread-safe cache for key<->value mappings.
 type SimpleCache struct {
 	mu sync.RWMutex
@@ -301,6 +321,13 @@ func (c *SimpleCache) Get(key string) (string, bool) {
 		}
 	*/
 	return sid, ok
+}
+
+// Clear removes all entries from the cache
+func (c *SimpleCache) Clear() {
+	c.mu.Lock()
+	c.m = make(map[string]string)
+	c.mu.Unlock()
 }
 
 // GPOCacheEntry stores GPO attributes needed for local group processing
@@ -340,4 +367,11 @@ func (c *GPOCache) Get(dn string) (*GPOCacheEntry, bool) {
 		}
 	*/
 	return entry, ok
+}
+
+// Clear removes all entries from the cache
+func (c *GPOCache) Clear() {
+	c.mu.Lock()
+	c.m = make(map[string]*GPOCacheEntry)
+	c.mu.Unlock()
 }

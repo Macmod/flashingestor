@@ -16,35 +16,35 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
-// Cache shards' constants
+// Cache shards' constants - affects memory vs contention tradeoff
 const (
-	ShardNumStandard = 16 // Standard number of shards
-	ShardNumSmall    = 2  // Smaller number of shards
+	ShardNumStandard = 16 // Used for high-volume lookups (SIDs, DNs, hostnames)
+	ShardNumSmall    = 2  // Used for lower-volume lookups (cert templates)
 )
 
 // State maintains global caches and mappings during BloodHound data construction.
 // This is a singleton accessed via BState().
 type State struct {
-	DomainControllers      map[string][]TypedPrincipal // Map of domain SID -> list of DCs
-	domainControllersMu    sync.RWMutex                // Protects DomainControllers
-	AttrGUIDMap            sync.Map                    // Thread-safe map[string]string
-	DomainSIDCache         *SimpleCache
-	SIDDomainCache         *SimpleCache
-	NetBIOSDomainCache     *SimpleCache
-	MemberCache            *StringCache
-	SIDCache               *StringCache
-	HostDnsCache           *StringCache
-	SamCache               *StringCache
-	MachineSIDCache        *StringCache
-	ChildCache             *ParentChildCache
-	AdminSDHolderHashCache sync.Map // Thread-safe map[string]string
-	CertTemplateCache      *StringCache
-	GPOCache               *GPOCache
-	WellKnown              *WellKnownSIDTracker
-	CacheWaitGroup         sync.WaitGroup
-	EmptySDCount           int
-	loadedCaches           map[string]bool
-	domainToForestMap      sync.Map
+	DomainControllers      map[string][]TypedPrincipal // Domain SID → DCs in that domain
+	domainControllersMu    sync.RWMutex                // Protects DomainControllers map writes
+	AttrGUIDMap            sync.Map                    // Schema attribute name → GUID mappings
+	DomainSIDCache         *SimpleCache                // Domain name → SID
+	SIDDomainCache         *SimpleCache                // SID → domain name
+	NetBIOSDomainCache     *SimpleCache                // NetBIOS name → DNS domain name
+	MemberCache            *StringCache                // DN → Entry
+	SIDCache               *StringCache                // SID → Entry
+	HostDnsCache           *StringCache                // domain+hostname → Computer Entry
+	SamCache               *StringCache                // domain+sAMAccountName → Entry
+	MachineSIDCache        *StringCache                // Object SID → Entry with MachineSID
+	ChildCache             *ParentChildCache           // Parent DN → Child Entries
+	AdminSDHolderHashCache sync.Map                    // Domain → AdminSDHolder ACL hash
+	CertTemplateCache      *StringCache                // domain+template CN/OID → Cert Template Entry
+	GPOCache               *GPOCache                   // DN → GPO metadata (for GPO local group processing)
+	WellKnown              *WellKnownSIDTracker        // Seen well-known SIDs (S-1-5-32-*, etc)
+	CacheWaitGroup         sync.WaitGroup              // Waitgroup for cache loading
+	EmptySDCount           int                         // # of entries with empty security descriptors
+	loadedCaches           map[string]bool             // Tracks which msgpack files have been loaded
+	domainToForestMap      sync.Map                    // Domain → forest root mapping
 }
 
 var bState *State
@@ -69,6 +69,8 @@ func (st *State) GetForestRoot(domain string) string {
 	return ""
 }
 
+// loadDomainToForestMap reads ForestDomains.json to establish domain→forest mappings.
+// This is used to determine forest-level relationships during conversion.
 func (st *State) loadDomainToForestMap(path string) {
 	st.domainToForestMap = sync.Map{}
 
@@ -89,6 +91,8 @@ func (st *State) loadDomainToForestMap(path string) {
 	}
 }
 
+// Init prepares the state for a new operation.
+// This is called at the start of each remote collection and conversion operations.
 func (st *State) Init(forestMapPath string) {
 	if forestMapPath != "" {
 		st.loadDomainToForestMap(forestMapPath)
@@ -96,10 +100,9 @@ func (st *State) Init(forestMapPath string) {
 		st.domainToForestMap = sync.Map{}
 	}
 
-	st.AttrGUIDMap = sync.Map{}
-
 	st.EmptySDCount = 0
 
+	// Initialize caches only if they don't exist
 	if st.DomainSIDCache == nil {
 		st.DomainSIDCache = NewSimpleCache()
 	}
@@ -114,10 +117,6 @@ func (st *State) Init(forestMapPath string) {
 
 	if st.SIDCache == nil {
 		st.SIDCache = NewCache(ShardNumStandard)
-	}
-
-	if st.DomainControllers == nil {
-		st.DomainControllers = make(map[string][]TypedPrincipal)
 	}
 
 	if st.MemberCache == nil {
@@ -152,21 +151,33 @@ func (st *State) Init(forestMapPath string) {
 		st.WellKnown = NewWellKnownSIDTracker()
 	}
 
+	if st.DomainControllers == nil {
+		st.domainControllersMu.Lock()
+		st.DomainControllers = make(map[string][]TypedPrincipal)
+		st.domainControllersMu.Unlock()
+	}
+
 	if st.loadedCaches == nil {
 		st.loadedCaches = make(map[string]bool)
 	}
 }
 
+// IsCacheLoaded checks if a msgpack file has already been loaded into caches.
+// This prevents re-processing the same file multiple times.
 func (st *State) IsCacheLoaded(fileName string) bool {
 	_, exists := st.loadedCaches[fileName]
 	return exists
 }
 
+// MarkCacheLoaded records that a msgpack file has been processed.
 func (st *State) MarkCacheLoaded(fileName string) {
 	st.loadedCaches[fileName] = true
 }
 
-func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log chan<- core.LogMessage, shouldAbort func() bool, progressCallback func(processed, total int)) error {
+// CacheEntries reads LDAP entries from a msgpack file and populates multiple caches
+// for efficient lookups during remote collection / conversion steps. Different entry types are cached
+// in different ways based on the identifier (domains, users, computers, etc).
+func (st *State) CacheEntries(reader *reader.MPReader, identifier string, logger *core.Logger, shouldAbort func() bool, progressCallback func(processed, total int)) error {
 	processedCount := 0
 
 	originalEntry := new(ldap.Entry)
@@ -208,10 +219,10 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 			ObjectType:       resolvedEntry["type"],
 		})
 
-		// Cache entry in both ChildCache and MemberCache
-		// ChildCache => Resolves all children of a DN efficiently
-		// MemberCache => Resolves a single entry by its DN
-		// SID cache => Resolves a single entry by its SID
+		// Populate multiple caches for different lookup patterns:
+		// - ChildCache: enables efficient "get all children of an OU/container" queries
+		// - MemberCache: DN-based lookups for group membership resolution
+		// - SIDCache: SID-based lookups (primary key for most BloodHound operations)
 		parentDN := entry.GetParentDN()
 		if parentDN != "" {
 			st.ChildCache.AddChild(parentDN, &cacheEntry)
@@ -229,7 +240,6 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 			}
 
 			if entry.IsDC() {
-				// Get domain SID from entry
 				domainSID, err := entry.GetDomainSID()
 				if err == nil && domainSID != "" {
 					st.domainControllersMu.Lock()
@@ -260,30 +270,24 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 		} else if identifier == "containers" {
 			// Check if this is the AdminSDHolder container
 			if strings.HasPrefix(strings.ToUpper(entry.DN), "CN=ADMINSDHOLDER,CN=SYSTEM,") {
-				// Get the domain name from the entry's DN
 				domainName := entry.GetDomainFromDN()
 
-				// Get the security descriptor
 				securityDescriptor := entry.GetAttrRawVal("nTSecurityDescriptor", []byte{})
 				if len(securityDescriptor) > 0 {
 					// Calculate the implicit ACL hash
 					aclHash, err := CalculateImplicitACLHash(securityDescriptor)
 					if err != nil {
-						if log != nil {
-							log <- core.LogMessage{Message: fmt.Sprintf("❌ Error calculating AdminSDHolder ACL hash for %s: %v", domainName, err), Level: 0}
-						}
+						logger.Log0("❌ Error calculating AdminSDHolder ACL hash for %s: %v", domainName, err)
 					} else if aclHash != "" {
 						// Store the hash indexed by domain name
 						st.AdminSDHolderHashCache.Store(domainName, aclHash)
-						if log != nil {
-							log <- core.LogMessage{Message: fmt.Sprintf("🔒 Cached AdminSDHolder ACL hash for domain \"%s\"", domainName), Level: 0}
-						}
+						logger.Log0(fmt.Sprintf("🔒 Cached AdminSDHolder ACL hash for domain \"%s\"", domainName))
 					}
 				}
 			}
 		} else if identifier == "configuration" {
 			objectClasses := entry.GetAttrVals("objectClass", []string{})
-			// Cache cert template CN to GUID mapping before building
+			// Certificate templates can be referenced by CN or OID, so cache both
 			if slices.Contains(objectClasses, "pKICertificateTemplate") {
 				cn := entry.GetAttrVal("cn", "")
 				oid := entry.GetAttrVal("msPKI-Cert-Template-OID", "")
@@ -313,6 +317,7 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 			}
 		}
 
+		// sAMAccountName lookups are used extensively for user/computer/group resolution
 		if sAMAccountName != "" {
 			st.SamCache.Set(domainName+"+"+sAMAccountName, &cacheEntry)
 		}
@@ -321,7 +326,7 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, log ch
 	return nil
 }
 
-// ClearCache clears all cached data and resets the state
+// Clear clears all cached data and resets the state
 func (st *State) Clear() {
 	st.domainControllersMu.Lock()
 	st.DomainControllers = make(map[string][]TypedPrincipal, 0)
@@ -345,6 +350,9 @@ func (st *State) Clear() {
 	st.loadedCaches = make(map[string]bool)
 }
 
+// resolveADEntry converts a raw LDAP entry into a BloodHound-compatible typed principal.
+// It determines the object type (User, Computer, Group, OU, etc) and extracts the appropriate
+// identifier (SID or GUID) and principal name based on AD object class and attributes.
 func resolveADEntry(entry gildap.LDAPEntry) map[string]string {
 	resolved := make(map[string]string)
 
@@ -361,13 +369,11 @@ func resolveADEntry(entry gildap.LDAPEntry) map[string]string {
 	resolved["principal"] = strings.ToUpper(account + "@" + domain)
 
 	if account == "" {
-		// If there is no sAMAccountName, try to get some
-		// sort of identifier to replace the principal
-		// and figure out the type
+		// Objects without sAMAccountName: domains, OUs, containers, etc.
+		// These use GUID as identifier instead of SID
 		if slices.Contains(objectClass, "domain") {
 			resolved["type"] = "Domain"
 		} else if guidStr := entry.GetGUID(); guidStr != "" {
-			// Handle objects with GUIDs (OUs / Containers, etc)
 			resolved["objectid"] = strings.ToUpper(guidStr)
 			name := entry.GetAttrVal("name", "")
 			resolved["principal"] = strings.ToUpper(name + "@" + domain)
@@ -383,22 +389,27 @@ func resolveADEntry(entry gildap.LDAPEntry) map[string]string {
 			resolved["type"] = "Base"
 		}
 	} else {
-		// If there is a sAMAccountName, it's a nice principal; just fill its type field
+		// Objects with sAMAccountName: users, computers, groups
+		// Type is determined by sAMAccountType attribute
 		accountTypeVal := entry.GetAttrVal("sAMAccountType", "")
 		accountType, _ := strconv.Atoi(accountTypeVal)
 
 		switch {
 		case slices.Contains([]int{268435456, 268435457, 536870912, 536870913}, accountType):
+			// Distribution/security groups (global/universal)
 			resolved["type"] = "Group"
 		case accountType == 805306368 ||
 			slices.Contains(objectClass, "msDS-GroupManagedServiceAccount") ||
 			slices.Contains(objectClass, "msDS-ManagedServiceAccount"):
+			// User accounts (including gMSA/sMSA service accounts)
 			resolved["type"] = "User"
 		case accountType == 805306369:
+			// Computer accounts
 			resolved["type"] = "Computer"
 			shortName := strings.TrimSuffix(account, "$")
 			resolved["principal"] = strings.ToUpper(shortName + "." + domain)
 		case accountType == 805306370:
+			// Trust accounts
 			resolved["type"] = "trustaccount"
 		default:
 			resolved["type"] = "Base"

@@ -50,8 +50,7 @@ type IngestionManager struct {
 	auth                *config.CredentialMgr
 	resolver            *net.Resolver
 	ldapFolder          string
-	logFunc             func(string, ...interface{})
-	logVerbose          func(string, ...interface{})
+	logger              *core.Logger
 	uiApp               *ui.Application
 	domainQueue         chan DomainRequest
 	trustEntriesChan    chan *ldap.Entry
@@ -170,7 +169,7 @@ func (m *IngestionManager) loadForestDomains() {
 		for domain, forestRoot := range existingForest {
 			m.forestStructure.Store(domain, forestRoot)
 		}
-		m.logVerbose("📂 [blue]Loaded %d existing forest domain mapping(s)[-]", len(existingForest))
+		m.logger.Log1("📂 [blue]Loaded %d existing forest domain mapping(s)[-]", len(existingForest))
 	}
 }
 
@@ -189,7 +188,7 @@ func (m *IngestionManager) saveForestDomains() {
 	forestFile := filepath.Join(m.ldapFolder, "ForestDomains.json")
 	file, err := os.Create(forestFile)
 	if err != nil {
-		m.logFunc("🫠 [yellow]Failed to create forest structure file: %v[-]", err)
+		m.logger.Log0("🫠 [yellow]Failed to create forest structure file: %v[-]", err)
 		return
 	}
 	defer file.Close()
@@ -197,10 +196,10 @@ func (m *IngestionManager) saveForestDomains() {
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(forestMap); err != nil {
-		m.logFunc("🫠 [yellow]Failed to write forest structure: %v[-]", err)
+		m.logger.Log0("🫠 [yellow]Failed to write forest structure: %v[-]", err)
 	} else {
 		if fileInfo, err := os.Stat(forestFile); err == nil {
-			m.logVerbose("✅ Saved %s (%s)", forestFile, core.FormatFileSize(fileInfo.Size()))
+			m.logger.Log1("✅ Saved %s (%s)", forestFile, core.FormatFileSize(fileInfo.Size()))
 		}
 	}
 }
@@ -266,18 +265,22 @@ func (m *IngestionManager) start(
 	go m.processConfigurationEntries()
 
 	m.pendingDomains.Add(1)
-	m.domainQueue <- DomainRequest{
+
+	newDomainRequest := DomainRequest{
 		DomainName:       initialDomain,
 		BaseDN:           initialBaseDN,
 		DomainController: initialDC,
 		SourceDomain:     "",
 	}
+	m.domainQueue <- newDomainRequest
 
 	if !m.appendForestDomains {
 		m.forestStructure = &sync.Map{}
 	}
 
 	go func() {
+		m.uiApp.SetRunning(true, "ingestion")
+
 		for req := range m.domainQueue {
 			// Check if abort was requested before processing next domain
 			if m.globalAborted.Load() {
@@ -291,13 +294,15 @@ func (m *IngestionManager) start(
 		}
 
 		// All domains have been processed, write forest structure and log final summary
+		m.uiApp.SetRunning(false, "")
+
 		if m.domainCount.Load() > 0 {
 			m.saveForestDomains()
 
 			totalDuration := time.Since(m.startTime)
-			m.logFunc("🕝 [blue]Ingested %d domain(s) in %s[-]", m.domainCount.Load(), core.FormatDuration(totalDuration))
+			m.logger.Log0("🕝 [blue]Ingested %d domain(s) in %s[-]", m.domainCount.Load(), core.FormatDuration(totalDuration))
 		} else {
-			m.logFunc("🫠 [red]No domains were ingested.[-]")
+			m.logger.Log0("🫠 [red]No domains were ingested.[-]")
 		}
 	}()
 }
@@ -334,11 +339,11 @@ func (m *IngestionManager) processConfigurationEntries() {
 		}
 
 		// Always show discovered forest domain
-		m.logFunc("🔗 [green]New domain found in forest of \"%s\": \"%s\"[-]", sourceDomain, domainName)
+		m.logger.Log0("🔗 [green]New domain found in forest of \"%s\": \"%s\"[-]", sourceDomain, domainName)
 
 		// Only add to queue if searchForest is enabled
 		if !m.searchForest {
-			m.logFunc("🦘 [yellow]Not queueing \"%s\" - search_forest is disabled[-]", domainName)
+			m.logger.Log0("🦘 [yellow]Not queueing \"%s\" - search_forest is disabled[-]", domainName)
 			continue
 		}
 
@@ -348,12 +353,16 @@ func (m *IngestionManager) processConfigurationEntries() {
 
 		baseDN := m.inferBaseDN(domainName)
 		m.pendingDomains.Add(1)
-		m.domainQueue <- DomainRequest{
+
+		newDomainRequest := DomainRequest{
 			DomainName:       domainName,
 			BaseDN:           baseDN,
 			DomainController: "",
 			SourceDomain:     sourceDomain,
 		}
+		m.domainQueue <- newDomainRequest
+
+		m.logger.Log2("SearchForest DomainRequest: {\"domain\": \"%s\", \"basedn\": \"%s\", \"dc\": \"%s\", \"srcdom\": \"%s\"}", newDomainRequest.DomainName, newDomainRequest.BaseDN, newDomainRequest.DomainController, newDomainRequest.SourceDomain)
 	}
 
 	// All entries have been processed, close channel
@@ -370,7 +379,7 @@ func (m *IngestionManager) processTrustEntries() {
 
 		trustName := ldapEntry.GetAttrVal("name", "")
 		if trustName == "" {
-			m.logFunc("🫠 [yellow]Skipping trust with missing name attribute[-]")
+			m.logger.Log0("🫠 [yellow]Skipping trust with missing name attribute[-]")
 			continue
 		}
 
@@ -384,7 +393,7 @@ func (m *IngestionManager) processTrustEntries() {
 		}
 
 		// Show discovered trust
-		m.logFunc("🔗 [green]New domain found from \"%s\" trusts: \"%s\"[-]", sourceDomain, trustName)
+		m.logger.Log0("🔗 [green]New domain found from \"%s\" trusts: \"%s\"[-]", sourceDomain, trustName)
 
 		// Filter by trust direction + transitivity if recurse_feasible_only is enabled
 		if m.recurseFeasibleOnly {
@@ -402,7 +411,7 @@ func (m *IngestionManager) processTrustEntries() {
 
 			// Check if TRUST_DIRECTION_INBOUND (0x1) flag is absent
 			if trustDirection&0x1 == 0 {
-				m.logFunc(
+				m.logger.Log0(
 					"🦘 [yellow]Skipping \"%s\" (DIR=%d,ATTR=%d) - recurse_feasible_only is enabled and it's not inbound[-]",
 					trustName,
 					trustDirection,
@@ -415,7 +424,7 @@ func (m *IngestionManager) processTrustEntries() {
 			if sourceDomain != "" && sourceDomain != m.initialDomain {
 				// Check if TRUST_ATTRIBUTE_NON_TRANSITIVE (0x1) flag is set
 				if trustAttributes&0x1 != 0 {
-					m.logFunc(
+					m.logger.Log0(
 						"🦘 [yellow]Skipping \"%s\" (DIR=%d,ATTR=%d) - recurse_feasible_only is enabled and it's nontransitive[-]",
 						trustName,
 						trustDirection,
@@ -428,7 +437,7 @@ func (m *IngestionManager) processTrustEntries() {
 
 		// Only add to queue if recurseTrusts is enabled
 		if !m.recurseTrusts {
-			m.logFunc("🦘 [yellow]Not queueing \"%s\" - recurse_trusts is disabled[-]", trustName)
+			m.logger.Log0("🦘 [yellow]Not queueing \"%s\" - recurse_trusts is disabled[-]", trustName)
 			continue
 		}
 
@@ -439,12 +448,16 @@ func (m *IngestionManager) processTrustEntries() {
 
 		baseDN := m.inferBaseDN(trustName)
 		m.pendingDomains.Add(1)
-		m.domainQueue <- DomainRequest{
+
+		newDomainRequest := DomainRequest{
 			DomainName:       trustName,
 			BaseDN:           baseDN,
 			DomainController: "",
 			SourceDomain:     sourceDomain,
 		}
+
+		m.domainQueue <- newDomainRequest
+		m.logger.Log2("RecurseTrusts DomainRequest: {\"domain\": \"%s\", \"basedn\": \"%s\", \"dc\": \"%s\", \"srcdom\": \"%s\"}", newDomainRequest.DomainName, newDomainRequest.BaseDN, newDomainRequest.DomainController, newDomainRequest.SourceDomain)
 	}
 
 	// All trusts have been processed, close channel
@@ -511,7 +524,7 @@ func (m *IngestionManager) discoverDC(ctx context.Context, domainName string) (s
 }
 
 func (m *IngestionManager) notifyIngestionSkipped(domainName string) {
-	m.logFunc("🛑 [red]Skipping ingestion of \"%s\"[-]", domainName)
+	m.logger.Log0("🛑 [red]Skipping ingestion of \"%s\"[-]", domainName)
 
 	// Update all rows to show "Skipped" status
 	for _, job := range m.jobManager.jobs {
@@ -520,14 +533,14 @@ func (m *IngestionManager) notifyIngestionSkipped(domainName string) {
 }
 
 func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN, domainController string) {
-	m.logFunc("-")
+	m.logger.Log0("-")
 	m.uiApp.AddDomainTab(domainName)
 	m.uiApp.SwitchToDomainTab(domainName)
 	m.uiApp.InsertIngestHeader(domainName)
 
 	currentDomainFolder := filepath.Join(m.ldapFolder, domainName)
 	if err := os.MkdirAll(currentDomainFolder, 0755); err != nil {
-		m.logFunc("❌ Failed to create domain folder: %v", err)
+		m.logger.Log0("❌ Failed to create domain folder: %v", err)
 		m.notifyIngestionSkipped(domainName)
 		return
 	}
@@ -545,19 +558,16 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 
 	m.uiApp.SetAbortCallback(func() {
 		if aborted.CompareAndSwap(false, true) {
-			m.logFunc("🛑 [red]Abort requested for LDAP ingestion...[-]")
+			m.logger.Log0("🛑 [red]Abort requested for LDAP ingestion...[-]")
 			m.globalAborted.Store(true) // Set global abort flag
 			cancel()
 		}
 	})
 
-	m.uiApp.SetRunning(true, "ingestion")
-
 	defer func() {
 		spinner.Stop()
 		cancel()
 		m.uiApp.SetAbortCallback(nil)
-		m.uiApp.SetRunning(false, "")
 
 		// Track completion and close queue when all domains are done
 		if !aborted.Load() {
@@ -573,23 +583,23 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 	spinner.Start()
 
 	// Test LDAP connection before starting ingestion for this domain
-	m.logFunc("🔍 [blue]Testing LDAP connection to DC for \"%s\"...[-]", domainName)
-	m.logFunc("🔗 [blue]Credential:[-] \"%s@%s\"", m.auth.Creds().Username, m.auth.Creds().Domain)
+	m.logger.Log0("🔍 [blue]Testing LDAP connection to DC for \"%s\"...[-]", domainName)
+	m.logger.Log0("🔗 [blue]Credential:[-] \"%s@%s\"", m.auth.Creds().Username, m.auth.Creds().Domain)
 	if domainController == "" {
 		dnsCtx, dnsCancel := context.WithTimeout(ctx, config.DNS_DIAL_TIMEOUT)
 		defer dnsCancel()
 
 		discoveredDC, err := m.discoverDC(dnsCtx, domainName)
 		if err != nil {
-			m.logFunc("❌ [red]Failed to discover DC for \"%s\": %v[-]", domainName, err)
+			m.logger.Log0("❌ [red]Failed to discover DC for \"%s\": %v[-]", domainName, err)
 			m.notifyIngestionSkipped(domainName)
 			return
 		}
 
 		domainController = discoveredDC
-		m.logFunc("🔗 [blue]Discovered DC:[-] \"%s\"", domainController)
+		m.logger.Log0("🔗 [blue]Discovered DC:[-] \"%s\"", domainController)
 	} else {
-		m.logFunc("🔗 [blue]Provided DC:[-] \"%s\"", domainController)
+		m.logger.Log0("🔗 [blue]Provided DC:[-] \"%s\"", domainController)
 	}
 
 	ldapOptions := m.ldapAuthOptions
@@ -605,7 +615,7 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 	if err != nil {
 		// Check if fallback is enabled and we're using LDAPS
 		if m.ldapsToLdapFallback && strings.EqualFold(ldapOptions.Scheme, "ldaps") {
-			m.logFunc("🤔 [yellow]LDAPS connection failed for \"%s\", attempting LDAP fallback...[-]", domainName)
+			m.logger.Log0("🤔 [yellow]LDAPS connection failed for \"%s\", attempting LDAP fallback...[-]", domainName)
 
 			// Update domain controller port from 636 to 389 if needed
 			ldapDC := domainController
@@ -624,23 +634,23 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 
 			rootDN, err = m.testLDAPConnection(testCtx2, ldapTarget, &fallbackLdapOptions)
 			if err == nil {
-				m.logFunc("✅ [green]LDAP fallback successful for \"%s\"[-]", domainName)
+				m.logger.Log0("✅ [green]LDAP fallback successful for \"%s\"[-]", domainName)
 				// Use the LDAP target and update LDAP options
 				target = ldapTarget
 				ldapOptions = &fallbackLdapOptions
 			} else {
-				m.logFunc("❌ [red]LDAP fallback also failed for \"%s\": %v[-]", domainName, err)
+				m.logger.Log0("❌ [red]LDAP fallback also failed for \"%s\": %v[-]", domainName, err)
 				m.notifyIngestionSkipped(domainName)
 				return
 			}
 		} else {
-			m.logFunc("❌ [red]LDAP connection test failed for \"%s\": %v[-]", domainName, err)
+			m.logger.Log0("❌ [red]LDAP connection test failed for \"%s\": %v[-]", domainName, err)
 			m.notifyIngestionSkipped(domainName)
 			return
 		}
 	}
 
-	m.logFunc("✅ [green]LDAP connection test successful for \"%s\"[-]", domainName)
+	m.logger.Log0("✅ [green]LDAP connection test successful for \"%s\"[-]", domainName)
 	forestRoot := ""
 	forestRootFolder := ""
 	var forestStatus *ForestCollectionStatus
@@ -648,7 +658,7 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 		forestRoot = gildap.DistinguishedNameToDomain(rootDN)
 		forestRootFolder = filepath.Join(m.ldapFolder, "FOREST+"+forestRoot)
 		if err := os.MkdirAll(forestRootFolder, 0755); err != nil {
-			m.logFunc("❌ Failed to create domain folder: %v", err)
+			m.logger.Log0("❌ Failed to create domain folder: %v", err)
 			return
 		}
 
@@ -657,9 +667,9 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 
 		// Tell the user about the forest root
 		if strings.EqualFold(baseDN, rootDN) {
-			m.logFunc("🔗 [blue]Domain \"%s\" is the root of its' forest[-]", domainName)
+			m.logger.Log0("🔗 [blue]Domain \"%s\" is the root of its' forest[-]", domainName)
 		} else {
-			m.logFunc("🔗 [blue]Forest root for \"%s\"[-]: \"%s\"", domainName, forestRoot)
+			m.logger.Log0("🔗 [blue]Forest root for \"%s\"[-]: \"%s\"", domainName, forestRoot)
 		}
 
 		// Get or create forest collection status
@@ -675,17 +685,13 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 			if forestStatus.Schema {
 				skipped = append(skipped, "Schema")
 			}
-			m.logFunc("🦘 [yellow]%s already collected for forest \"%s\", skipping...[-]", strings.Join(skipped, " and "), forestRoot)
+			m.logger.Log0("🦘 [yellow]%s already collected for forest \"%s\", skipping...[-]", strings.Join(skipped, " and "), forestRoot)
 		}
 	} else {
-		m.logFunc("🫠 [yellow]Could not determine forest root for \"%s\". Skipping forest-related ingestion...[-]", domainName)
+		m.logger.Log0("🫠 [yellow]Could not determine forest root for \"%s\". Skipping forest-related ingestion...[-]", domainName)
 	}
 
-	m.logFunc("🚀 [cyan]Starting LDAP ingestion of \"%s\"...[-]", domainName)
-	/*
-		m.logFunc(fmt.Sprintf("CREDS %v\n", creds))
-		m.logFunc(fmt.Sprintf("TARGET %v\n", target))
-	*/
+	m.logger.Log0("🚀 [cyan]Starting LDAP ingestion of \"%s\"...[-]", domainName)
 
 	for i, job := range jobs {
 		// For forest-wide queries, save in forest root folder if available;
@@ -724,11 +730,21 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 
 		wg.Add(1)
 		spinner.SetRunning(domainName, i, true)
+		m.logger.Log2(
+			"🎡 Collecting \"[blue]%s[-]\" for domain \"[blue]%s[-]\":\n    [blue]Filter[-]: %s\n    [blue]Attributes[-]: %s\n    [blue]BaseDN[-]: %s",
+			job.Name, domainName, job.Filter,
+			strings.Join(job.Attributes, ","), job.BaseDN,
+		)
+
 		go func(j gildap.QueryJob, jobIndex int) {
 			m.runJob(
 				ctx, m.auth.Creds(), target, ldapOptions,
 				j, jobIndex, domainName,
 				spinner, updates, &wg,
+			)
+			m.logger.Log2(
+				"🎡 Finished \"[blue]%s[-]\" for domain \"[blue]%s[-]\"",
+				j.Name, domainName,
 			)
 		}(job, i)
 	}
@@ -776,7 +792,7 @@ func (m *IngestionManager) handleProgressUpdates(updates chan gildap.ProgressUpd
 		if update.Err != nil {
 			errorCount++
 			m.uiApp.UpdateIngestRow(domainName, update.Row, "[red]× Error[-]", "", "", "-", "", "-")
-			m.logFunc("❌ [red]Error during ingestion of job \"%s\": %s[-]", jobName, update.Err.Error())
+			m.logger.Log0("❌ [red]Error during ingestion of job \"%s\": %s[-]", jobName, update.Err.Error())
 			setForestStatus(jobName, false)
 			continue
 		}
@@ -786,10 +802,10 @@ func (m *IngestionManager) handleProgressUpdates(updates chan gildap.ProgressUpd
 			outputFile := jobs[update.Row-1].OutputFile
 			if outputFile != "" {
 				if fileInfo, err := os.Stat(outputFile); err == nil {
-					m.logVerbose("✅ Saved %s (%s)", outputFile, core.FormatFileSize(fileInfo.Size()))
+					m.logger.Log1("✅ Saved %s (%s)", outputFile, core.FormatFileSize(fileInfo.Size()))
 					setForestStatus(jobName, true)
 				} else {
-					m.logFunc("🫠 [yellow]Problem saving %s[-]", outputFile)
+					m.logger.Log0("🫠 [yellow]Problem saving %s[-]", outputFile)
 				}
 			}
 		} else {
@@ -799,15 +815,15 @@ func (m *IngestionManager) handleProgressUpdates(updates chan gildap.ProgressUpd
 
 	ingestDuration := time.Since(ingestStartTime)
 	if aborted.Load() {
-		m.logFunc("🛑 [red]Ingestion aborted after %s. Results may be incomplete.[-]", core.FormatDuration(ingestDuration))
+		m.logger.Log0("🛑 [red]Ingestion aborted after %s. Results may be incomplete.[-]", core.FormatDuration(ingestDuration))
 	} else if errorCount > 0 {
 		stepWord := "step"
 		if errorCount > 1 {
 			stepWord = "steps"
 		}
-		m.logFunc("🫠 [yellow]Ingestion of \"%s\" completed with errors in %d %s. Results may be incomplete.[-]", domainName, errorCount, stepWord)
+		m.logger.Log0("🫠 [yellow]Ingestion of \"%s\" completed with errors in %d %s. Results may be incomplete.[-]", domainName, errorCount, stepWord)
 	} else {
-		m.logFunc("✅ [green]Ingestion of \"%s\" completed in %s[-]", domainName, core.FormatDuration(ingestDuration))
+		m.logger.Log0("✅ [green]Ingestion of \"%s\" completed in %s[-]", domainName, core.FormatDuration(ingestDuration))
 	}
 }
 

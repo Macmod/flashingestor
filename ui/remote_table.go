@@ -31,7 +31,7 @@ func (app *Application) SetupRemoteCollectionTable() {
 	app.remoteCollectPage.SetCell(1, 8, tview.NewTableCell("-"))
 
 	app.remoteCollectPage.SetCell(2, 0, tview.NewTableCell("[yellow]Pending"))
-	app.remoteCollectPage.SetCell(2, 1, tview.NewTableCell("RemoteEnterpriseCAs"))
+	app.remoteCollectPage.SetCell(2, 1, tview.NewTableCell("Load Computers"))
 	app.remoteCollectPage.SetCell(2, 2, tview.NewTableCell("-"))
 	app.remoteCollectPage.SetCell(2, 3, tview.NewTableCell("-"))
 	app.remoteCollectPage.SetCell(2, 4, tview.NewTableCell("-"))
@@ -41,7 +41,7 @@ func (app *Application) SetupRemoteCollectionTable() {
 	app.remoteCollectPage.SetCell(2, 8, tview.NewTableCell("-"))
 
 	app.remoteCollectPage.SetCell(3, 0, tview.NewTableCell("[yellow]Pending"))
-	app.remoteCollectPage.SetCell(3, 1, tview.NewTableCell("DNS Lookups"))
+	app.remoteCollectPage.SetCell(3, 1, tview.NewTableCell("Status Checks"))
 	app.remoteCollectPage.SetCell(3, 2, tview.NewTableCell("-"))
 	app.remoteCollectPage.SetCell(3, 3, tview.NewTableCell("-"))
 	app.remoteCollectPage.SetCell(3, 4, tview.NewTableCell("-"))
@@ -51,7 +51,7 @@ func (app *Application) SetupRemoteCollectionTable() {
 	app.remoteCollectPage.SetCell(3, 8, tview.NewTableCell("-"))
 
 	app.remoteCollectPage.SetCell(4, 0, tview.NewTableCell("[yellow]Pending"))
-	app.remoteCollectPage.SetCell(4, 1, tview.NewTableCell("RemoteComputers"))
+	app.remoteCollectPage.SetCell(4, 1, tview.NewTableCell("DNS Lookups"))
 	app.remoteCollectPage.SetCell(4, 2, tview.NewTableCell("-"))
 	app.remoteCollectPage.SetCell(4, 3, tview.NewTableCell("-"))
 	app.remoteCollectPage.SetCell(4, 4, tview.NewTableCell("-"))
@@ -59,34 +59,59 @@ func (app *Application) SetupRemoteCollectionTable() {
 	app.remoteCollectPage.SetCell(4, 6, tview.NewTableCell("-"))
 	app.remoteCollectPage.SetCell(4, 7, tview.NewTableCell("-"))
 	app.remoteCollectPage.SetCell(4, 8, tview.NewTableCell("-"))
+
+	app.remoteCollectPage.SetCell(5, 0, tview.NewTableCell("[yellow]Pending"))
+	app.remoteCollectPage.SetCell(5, 1, tview.NewTableCell("RemoteEnterpriseCAs"))
+	app.remoteCollectPage.SetCell(5, 2, tview.NewTableCell("-"))
+	app.remoteCollectPage.SetCell(5, 3, tview.NewTableCell("-"))
+	app.remoteCollectPage.SetCell(5, 4, tview.NewTableCell("-"))
+	app.remoteCollectPage.SetCell(5, 5, tview.NewTableCell("-"))
+	app.remoteCollectPage.SetCell(5, 6, tview.NewTableCell("-"))
+	app.remoteCollectPage.SetCell(5, 7, tview.NewTableCell("-"))
+	app.remoteCollectPage.SetCell(5, 8, tview.NewTableCell("-"))
+
+	app.remoteCollectPage.SetCell(6, 0, tview.NewTableCell("[yellow]Pending"))
+	app.remoteCollectPage.SetCell(6, 1, tview.NewTableCell("RemoteComputers"))
+	app.remoteCollectPage.SetCell(6, 2, tview.NewTableCell("-"))
+	app.remoteCollectPage.SetCell(6, 3, tview.NewTableCell("-"))
+	app.remoteCollectPage.SetCell(6, 4, tview.NewTableCell("-"))
+	app.remoteCollectPage.SetCell(6, 5, tview.NewTableCell("-"))
+	app.remoteCollectPage.SetCell(6, 6, tview.NewTableCell("-"))
+	app.remoteCollectPage.SetCell(6, 7, tview.NewTableCell("-"))
+	app.remoteCollectPage.SetCell(6, 8, tview.NewTableCell("-"))
 }
 
 // UpdateRemoteCollectionRow updates a specific step in the remote collection table
-// row: 1=Cache Loading, 2=Remote Collection (CAs), 3=DNS Lookups, 4=Remote Collection (Computers)
+// row: 1=Cache Loading, 2=Load Computers, 3=Availability Checks, 4=DNS Lookups, 5=Remote Collection (CAs), 6=Remote Collection (Computers)
 // Columns: 0=Status, 1=Step, 2=Processed, 3=Percent, 4=Speed, 5=Avg Speed, 6=Success, 7=ETA, 8=Elapsed
 func (app *Application) UpdateRemoteCollectionRow(row int, status, processed, percent, speed, avgSpeed, success, eta, elapsed string) {
-	if status != "" {
-		app.remoteCollectPage.SetCell(row, 0, tview.NewTableCell(status))
-	}
-	if processed != "" {
-		app.remoteCollectPage.SetCell(row, 2, tview.NewTableCell(processed))
-	}
-	if percent != "" {
-		app.remoteCollectPage.SetCell(row, 3, tview.NewTableCell(percent))
-	}
-	if speed != "" {
-		app.remoteCollectPage.SetCell(row, 4, tview.NewTableCell(padSpeed(speed)))
-	}
-	if avgSpeed != "" {
-		app.remoteCollectPage.SetCell(row, 5, tview.NewTableCell(avgSpeed))
-	}
-	if success != "" {
-		app.remoteCollectPage.SetCell(row, 6, tview.NewTableCell(success))
-	}
-	if eta != "" {
-		app.remoteCollectPage.SetCell(row, 7, tview.NewTableCell(eta))
-	}
-	if elapsed != "" {
-		app.remoteCollectPage.SetCell(row, 8, tview.NewTableCell(elapsed))
-	}
+	// Called from background goroutines, use QueueUpdate to modify cells
+	// then RequestDraw for throttled screen updates
+	app.QueueUpdate(func() {
+		if status != "" {
+			app.remoteCollectPage.SetCell(row, 0, tview.NewTableCell(status))
+		}
+		if processed != "" {
+			app.remoteCollectPage.SetCell(row, 2, tview.NewTableCell(processed))
+		}
+		if percent != "" {
+			app.remoteCollectPage.SetCell(row, 3, tview.NewTableCell(percent))
+		}
+		if speed != "" {
+			app.remoteCollectPage.SetCell(row, 4, tview.NewTableCell(padString(speed, 8)))
+		}
+		if avgSpeed != "" {
+			app.remoteCollectPage.SetCell(row, 5, tview.NewTableCell(avgSpeed))
+		}
+		if success != "" {
+			app.remoteCollectPage.SetCell(row, 6, tview.NewTableCell(success))
+		}
+		if eta != "" {
+			app.remoteCollectPage.SetCell(row, 7, tview.NewTableCell(padString(eta, 5)))
+		}
+		if elapsed != "" {
+			app.remoteCollectPage.SetCell(row, 8, tview.NewTableCell(elapsed))
+		}
+		app.RequestDraw()
+	})
 }

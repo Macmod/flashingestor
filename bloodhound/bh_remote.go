@@ -1,6 +1,7 @@
 package bloodhound
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net"
@@ -22,30 +23,45 @@ import (
 
 // RemoteCollector executes remote data collection from AD computers and CAs.
 type RemoteCollector struct {
-	auth           *config.CredentialMgr
-	RuntimeOptions *config.RuntimeOptions
+	auth                *config.CredentialMgr
+	RuntimeOptions      *config.RuntimeOptions
+	RemoteMethodTimeout time.Duration
+	logger              *core.Logger
 }
 
 // NewRemoteCollector creates a collector with the given credentials and options.
-func NewRemoteCollector(authenticator *config.CredentialMgr, runtimeOptions *config.RuntimeOptions) *RemoteCollector {
+func NewRemoteCollector(authenticator *config.CredentialMgr, runtimeOptions *config.RuntimeOptions, methodTimeout time.Duration, logger *core.Logger) *RemoteCollector {
 	return &RemoteCollector{
-		auth:           authenticator,
-		RuntimeOptions: runtimeOptions,
+		auth:                authenticator,
+		RuntimeOptions:      runtimeOptions,
+		RemoteMethodTimeout: methodTimeout,
+		logger:              logger,
 	}
 }
 
 type RemoteCollectionUpdate = core.RemoteCollectionUpdate
 
-const TotalRemoteSteps = 4
+const (
+	TotalRemoteSteps = 6
+)
+
+// formatSuccessRate formats a success count/total as percentage string
+func formatSuccessRate(success, total int) string {
+	if total == 0 {
+		return "0/0"
+	}
+	percent := float64(success) / float64(total) * 100.0
+	return fmt.Sprintf("%d/%d (%.1f%%)", success, total, percent)
+}
 
 // PerformRemoteCollection gathers data from computers and CAs using RPC and HTTP.
 func (bh *BH) PerformRemoteCollection(auth *config.CredentialMgr) {
-	// Initialize builder state
+	// Initialize builder state (clears old data)
 	forestMapPath := filepath.Join(bh.LdapFolder, "ForestDomains.json")
 	builder.BState().Init(forestMapPath)
 
 	// Create remote collector with authentication options
-	collector := NewRemoteCollector(auth, bh.RuntimeOptions)
+	collector := NewRemoteCollector(auth, bh.RuntimeOptions, bh.RemoteMethodTimeout, bh.Logger)
 
 	notifyAbort := func(currentStep int) bool {
 		if bh.IsAborted() {
@@ -68,26 +84,45 @@ func (bh *BH) PerformRemoteCollection(auth *config.CredentialMgr) {
 		return
 	}
 
-	// Collect from Enterprise CAs
-	enterpriseCAs := bh.loadEnterpriseCATargets()
-	if notifyAbort(1) {
-		return
-	}
-
-	bh.runRemoteStep(2, func() { bh.collectEnterpriseCAData(2, enterpriseCAs, collector) })
+	// Load computer targets from LDAP
+	var allComputers []CollectionTarget
+	bh.runRemoteStep(2, func() { allComputers = bh.loadComputerTargets(2) })
 	if notifyAbort(2) {
 		return
 	}
 
-	// Collect from computers
-	var computers []CollectionTarget
-	bh.runRemoteStep(3, func() { computers = bh.loadComputerTargets(3) })
+	bh.log("✅ Found %d valid computers to collect data from", len(allComputers))
+
+	// Run availability checks
+	var availableComputers []CollectionTarget
+	bh.runRemoteStep(3, func() { availableComputers = bh.checkComputerAvailability(3, allComputers, collector) })
 	if notifyAbort(3) {
 		return
 	}
 
+	// Perform DNS lookups on available computers
+	var computers []CollectionTarget
+	bh.runRemoteStep(4, func() { computers = bh.performDNSLookups(4, availableComputers) })
+	if notifyAbort(4) {
+		return
+	}
+
+	bh.log("✅ Successfully resolved %d/%d computers via DNS", len(computers), len(availableComputers))
+
+	// Collect from Enterprise CAs
+	enterpriseCAs := bh.loadEnterpriseCATargets()
+	if notifyAbort(4) {
+		return
+	}
+
+	bh.log("🎯 About to perform active collection for %d enterprise CAs", len(enterpriseCAs))
+	bh.runRemoteStep(5, func() { bh.CollectRemoteEnterpriseCA(5, enterpriseCAs, collector) })
+	if notifyAbort(5) {
+		return
+	}
+
 	bh.log("🎯 About to perform active collection for %d computers", len(computers))
-	bh.runRemoteStep(4, func() { bh.collectComputerData(4, computers, collector) })
+	bh.runRemoteStep(6, func() { bh.collectComputerData(6, computers, collector) })
 }
 
 // runRemoteStep runs a remote collection step and sends progress events
@@ -186,12 +221,6 @@ func (bh *BH) loadRemoteCollectionCache(step int) {
 	progressCallback := func(_ int, _ int) {
 		totalProcessed++
 
-		// Throttle updates to avoid flooding the channel
-		now := time.Now()
-		if now.Sub(lastUpdateTime) < 100*time.Millisecond && totalProcessed < totalEntries {
-			return
-		}
-
 		elapsed := time.Since(startTime)
 		var percent float64
 		if totalEntries > 0 {
@@ -202,7 +231,8 @@ func (bh *BH) loadRemoteCollectionCache(step int) {
 		metrics := calculateProgressMetrics(totalProcessed, totalEntries, startTime, &lastUpdateTime, &lastCount)
 
 		if bh.RemoteCollectionUpdates != nil {
-			bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+			select {
+			case bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
 				Step:      step,
 				Processed: totalProcessed,
 				Total:     totalEntries,
@@ -211,6 +241,8 @@ func (bh *BH) loadRemoteCollectionCache(step int) {
 				AvgSpeed:  metrics.avgSpeedText,
 				ETA:       metrics.etaText,
 				Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+			}:
+			default:
 			}
 		}
 	}
@@ -224,7 +256,7 @@ func (bh *BH) loadRemoteCollectionCache(step int) {
 		filePath := info.reader.GetPath()
 		bh.logVerbose("📦 Loading %s", filePath)
 
-		builder.BState().CacheEntries(info.reader, info.identifier, bh.Log, bh.IsAborted, progressCallback)
+		builder.BState().CacheEntries(info.reader, info.identifier, bh.Logger, bh.IsAborted, progressCallback)
 
 		// Mark this cache as loaded
 		builder.BState().MarkCacheLoaded(filePath)
@@ -289,83 +321,162 @@ func (bh *BH) loadEnterpriseCATargets() []EnterpriseCACollectionTarget {
 		}
 	}
 
-	/*
-		if len(targets) > 0 {
-			firstTarget := targets[0]
-			for i := 0; i < 20; i++ {
-				targets = append(targets, firstTarget)
-			}
-		}
-	*/
-
 	return targets
 }
 
-// collectEnterpriseCAData collects data from enterprise CAs
-func (bh *BH) collectEnterpriseCAData(step int, targets []EnterpriseCACollectionTarget, collector *RemoteCollector) {
-	bh.log("🎯 About to perform active collection for %d enterprise CAs", len(targets))
+// CollectRemoteEnterpriseCA sets up encoding and delegates to collectEnterpriseCAData
+func (bh *BH) CollectRemoteEnterpriseCA(step int, targets []EnterpriseCACollectionTarget, collector *RemoteCollector) {
+	if len(targets) == 0 {
+		return
+	}
+
+	// Create output file with buffered writer
+	remoteCAFile := filepath.Join(bh.ActiveFolder, "RemoteEnterpriseCA.msgpack")
+	outFile, err := os.Create(remoteCAFile)
+	if err != nil {
+		bh.log("❌ Failed to create CA results file: %v", err)
+		return
+	}
+	defer outFile.Close()
+
+	// Use buffered writer for better encoding performance
+	bufWriter := bufio.NewWriterSize(outFile, 1024*1024)
+	defer bufWriter.Flush()
+
+	encoder := msgpack.NewEncoder(bufWriter)
+
+	bh.collectEnterpriseCAData(step, targets, collector, encoder)
+}
+
+// collectEnterpriseCAData collects data from enterprise CAs using worker pool
+func (bh *BH) collectEnterpriseCAData(step int, targets []EnterpriseCACollectionTarget, collector *RemoteCollector, encoder *msgpack.Encoder) {
+	// Prepare targets - resolve IPs upfront
+	for idx := range targets {
+		ip := net.ParseIP(targets[idx].DNSHostName)
+		if ip != nil {
+			targets[idx].IPAddress = targets[idx].DNSHostName
+		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), config.DNS_LOOKUP_TIMEOUT)
+			addrs, err := bh.Resolver.LookupHost(ctx, targets[idx].DNSHostName)
+			cancel()
+			if err == nil && len(addrs) > 0 {
+				targets[idx].IPAddress = addrs[0]
+			}
+		}
+	}
+
+	numWorkers := bh.RemoteWorkers
+	timeout := bh.RemoteComputerTimeout
+
+	targetChan := make(chan EnterpriseCACollectionTarget)
+	resultChan := make(chan EnterpriseCARemoteCollectionResult, bh.RemoteWriteBuff)
+
+	var wg sync.WaitGroup
+
+	// Start workers
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			for target := range targetChan {
+				if bh.IsAborted() {
+					return
+				}
+
+				if target.IPAddress == "" {
+					continue
+				}
+
+				collectionCtx, collectionCancel := context.WithTimeout(context.Background(), timeout)
+				result := collector.CollectRemoteEnterpriseCAWithContext(collectionCtx, target)
+				collectionCancel()
+
+				resultChan <- result
+			}
+		}(i)
+	}
+
+	// Process results
+	workersDone := make(chan struct{})
+	var processedCount int
+	var successCount int
+
+	go bh.processEnterpriseCAResults(step, resultChan, workersDone, encoder, targets, &processedCount, &successCount)
+
+	// Feed targets to workers
+	go func() {
+		for _, target := range targets {
+			if bh.IsAborted() {
+				break
+			}
+			targetChan <- target
+		}
+		close(targetChan)
+	}()
+
+	// Wait for workers
+	wg.Wait()
+	close(resultChan)
+
+	// Wait for result processor
+	<-workersDone
+}
+
+// processEnterpriseCAResults processes CA collection results from workers
+func (bh *BH) processEnterpriseCAResults(
+	step int,
+	resultChan chan EnterpriseCARemoteCollectionResult,
+	workersDone chan struct{},
+	encoder *msgpack.Encoder,
+	targets []EnterpriseCACollectionTarget,
+	processedCount *int,
+	successCount *int,
+) {
+	defer close(workersDone)
 
 	startTime := time.Now()
 	lastUpdateTime := startTime
 	lastCount := 0
-	successCount := 0
-	caResults := make(map[string]EnterpriseCARemoteCollectionResult)
 
-	for idx, caTarget := range targets {
-		if bh.IsAborted() {
-			return
-		}
+	// Track seen GUIDs to prevent duplicates
+	seenGUIDs := make(map[string]bool)
 
-		ctx, cancel := context.WithTimeout(context.Background(), bh.RemoteTimeout)
-
-		// Collect CA data
-		// If DNSHostName is not an IP, resolve it using the custom resolver
-		// to get the IP and store it in IPAddress field
-		ip := net.ParseIP(caTarget.DNSHostName)
-		if ip != nil {
-			// DNSHostName is already an IP address
-			caTarget.IPAddress = caTarget.DNSHostName
-		} else {
-			// Resolve DNSHostName to IP address
-			addrs, err := bh.Resolver.LookupHost(ctx, caTarget.DNSHostName)
-			if err == nil && len(addrs) > 0 {
-				caTarget.IPAddress = addrs[0]
+	for res := range resultChan {
+		// Encode result only if not seen before,
+		// but report progress given the entire set
+		// Repeated identifiers are not likely to happen outside of testing,
+		// but we handle it just to be safe.
+		if !seenGUIDs[res.GUID] {
+			seenGUIDs[res.GUID] = true
+			if err := encoder.Encode(res); err != nil {
+				bh.log("Failed to encode CA result: %v", err)
 			}
 		}
 
-		if caTarget.IPAddress != "" {
-			res := collector.CollectRemoteEnterpriseCA(ctx, caTarget)
+		*processedCount++
 
-			// Store results by GUID
-			caResults[caTarget.GUID] = res
-			successCount++
+		// Count successes
+		if bh.checkAnyCASuccess(res) {
+			*successCount++
 		}
 
-		cancel()
-
-		// Update progress in real-time
-		processedCount := idx + 1
 		elapsed := time.Since(startTime)
 
 		var percent float64
 		if len(targets) > 0 {
-			percent = float64(processedCount) / float64(len(targets)) * 100.0
+			percent = float64(*processedCount) / float64(len(targets)) * 100.0
 		}
 
-		// Calculate metrics
-		metrics := calculateProgressMetrics(processedCount, len(targets), startTime, &lastUpdateTime, &lastCount)
+		metrics := calculateProgressMetrics(*processedCount, len(targets), startTime, &lastUpdateTime, &lastCount)
 
-		// Calculate success
-		var successPercent float64
-		if len(targets) > 0 {
-			successPercent = float64(successCount) / float64(len(targets)) * 100.0
-		}
-		successText := fmt.Sprintf("%d/%d (%.1f%%)", successCount, len(targets), successPercent)
+		successText := formatSuccessRate(*successCount, *processedCount)
 
 		if bh.RemoteCollectionUpdates != nil {
-			bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+			select {
+			case bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
 				Step:      step,
-				Processed: processedCount,
+				Processed: *processedCount,
 				Total:     len(targets),
 				Percent:   percent,
 				Speed:     metrics.speedText,
@@ -373,44 +484,14 @@ func (bh *BH) collectEnterpriseCAData(step int, targets []EnterpriseCACollection
 				Success:   successText,
 				ETA:       metrics.etaText,
 				Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
-			}
-		}
-	}
-
-	// Update final status
-	// Store results - convert to pointer map
-	if bh.RemoteEnterpriseCACollection == nil {
-		bh.RemoteEnterpriseCACollection = make(map[string]*EnterpriseCARemoteCollectionResult)
-	}
-	for guid, result := range caResults {
-		resultCopy := result
-		bh.RemoteEnterpriseCACollection[guid] = &resultCopy
-	}
-
-	// Write CA results to file
-	if len(caResults) > 0 {
-		remoteCAFile := filepath.Join(bh.ActiveFolder, "RemoteEnterpriseCA.msgpack")
-		outFile, err := os.Create(remoteCAFile)
-		if err != nil {
-			bh.log("❌ Failed to create CA results file: %v", err)
-			return
-		}
-		defer outFile.Close()
-
-		encoder := msgpack.NewEncoder(outFile)
-		if err := encoder.Encode(caResults); err != nil {
-			bh.log("❌ Failed to write CA results: %v", err)
-		} else {
-			if fileInfo, err := os.Stat(remoteCAFile); err == nil {
-				bh.log("✅ CA results saved to: %s (%s)", remoteCAFile, formatFileSize(fileInfo.Size()))
-			} else {
-				bh.log("🫠 [yellow]Problem saving %s: %v[-]", remoteCAFile, err)
+			}:
+			default:
 			}
 		}
 	}
 }
 
-// loadComputerTargets performs DNS lookups and returns viable computer targets
+// loadComputerTargets reads computer entries from LDAP msgpack files
 func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 	var targets []CollectionTarget
 	computerPaths, err := bh.GetPaths("computers")
@@ -419,8 +500,8 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 	}
 
 	totalComputers := 0
-
 	readers := make([]*reader.MPReader, 0, len(computerPaths))
+
 	for _, computerPath := range computerPaths {
 		mpReader, err := reader.NewMPReader(computerPath)
 		if err != nil {
@@ -436,123 +517,14 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 		}
 
 		readers = append(readers, mpReader)
-
 		totalComputers += length
 	}
 
 	startTime := time.Now()
-	lastUpdateTime := startTime
 	entryCount := atomic.Int32{}
-	successCount := atomic.Int32{}
+	validCount := atomic.Int32{}
 
-	// Job structure for DNS lookup tasks
-	type dnsJob struct {
-		computerSid    string
-		dNSHostName    string
-		sAMAccountName string
-		isDC           bool
-		domain         string
-	}
-
-	// Create channels for job distribution
-	jobs := make(chan dnsJob, bh.DNSWorkers*2)
-	results := make(chan CollectionTarget, bh.DNSWorkers*2)
-
-	// Start DNS worker pool
-	var wg sync.WaitGroup
-	for w := 0; w < bh.DNSWorkers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for job := range jobs {
-				if bh.IsAborted() {
-					continue
-				}
-
-				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-				addrs, err := bh.Resolver.LookupHost(ctx, job.dNSHostName)
-				cancel()
-
-				if err == nil && len(addrs) > 0 {
-					successCount.Add(1)
-					results <- CollectionTarget{
-						SID:         job.computerSid,
-						DNSHostName: job.dNSHostName,
-						SamName:     job.sAMAccountName,
-						IPAddress:   addrs[0],
-						IsDC:        job.isDC,
-						Domain:      job.domain,
-					}
-				} else {
-					bh.logVerbose("🫠 [yellow]Could not resolve %s: %v[-]", job.dNSHostName, err)
-				}
-			}
-		}()
-	}
-
-	// Start result collector goroutine
-	done := make(chan struct{})
-	var targetsMu sync.Mutex
-	go func() {
-		for result := range results {
-			targetsMu.Lock()
-			targets = append(targets, result)
-			targetsMu.Unlock()
-		}
-		close(done)
-	}()
-
-	// Start progress updater goroutine
-	progressDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-		lastCountLocal := 0
-
-		for {
-			select {
-			case <-progressDone:
-				return
-			case <-ticker.C:
-				currentCount := int(entryCount.Load())
-				elapsed := time.Since(startTime)
-
-				var percent float64
-				if totalComputers > 0 {
-					percent = float64(currentCount) / float64(totalComputers) * 100.0
-				}
-
-				// Calculate metrics using helper
-				metrics := calculateProgressMetrics(currentCount, totalComputers, startTime, &lastUpdateTime, &lastCountLocal)
-
-				// Calculate success
-				currentSuccess := int(successCount.Load())
-				var successText string
-				if currentCount > 0 {
-					successPercent := float64(currentSuccess) / float64(currentCount) * 100.0
-					successText = fmt.Sprintf("%d/%d (%.1f%%)", currentSuccess, currentCount, successPercent)
-				} else {
-					successText = "0/0"
-				}
-
-				if bh.RemoteCollectionUpdates != nil {
-					bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
-						Step:      step,
-						Processed: currentCount,
-						Total:     totalComputers,
-						Percent:   percent,
-						Speed:     metrics.speedText,
-						AvgSpeed:  metrics.avgSpeedText,
-						Success:   successText,
-						ETA:       metrics.etaText,
-						Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
-					}
-				}
-			}
-		}
-	}()
-
-	// Read entries and submit DNS lookup jobs
+	// Read entries from LDAP files
 	for _, reader := range readers {
 		originalEntry := new(ldap.Entry)
 		var entry gildap.LDAPEntry
@@ -575,12 +547,42 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 			sAMAccountName := entry.GetAttrVal("sAMAccountName", "")
 
 			if dNSHostName != "" && sAMAccountName != "" {
-				jobs <- dnsJob{
-					computerSid:    entry.GetSID(),
-					dNSHostName:    dNSHostName,
-					sAMAccountName: sAMAccountName,
-					isDC:           entry.IsDC(),
-					domain:         entry.GetDomainFromDN(),
+				validCount.Add(1)
+				targets = append(targets, CollectionTarget{
+					SID:                entry.GetSID(),
+					DNSHostName:        dNSHostName,
+					SamName:            sAMAccountName,
+					IsDC:               entry.IsDC(),
+					Domain:             entry.GetDomainFromDN(),
+					OperatingSystem:    entry.GetAttrVal("operatingSystem", ""),
+					PwdLastSet:         gildap.FormatTime2(entry.GetAttrVal("pwdLastSet", "0")),
+					LastLogonTimestamp: gildap.FormatTime2(entry.GetAttrVal("lastLogonTimestamp", "0")),
+				})
+			}
+
+			// Send progress update
+			if bh.RemoteCollectionUpdates != nil {
+				currentCount := int(entryCount.Load())
+				currentValid := int(validCount.Load())
+				elapsed := time.Since(startTime)
+
+				var percent float64
+				if totalComputers > 0 {
+					percent = float64(currentCount) / float64(totalComputers) * 100.0
+				}
+
+				successText := formatSuccessRate(currentValid, currentCount)
+
+				select {
+				case bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+					Step:      step,
+					Processed: currentCount,
+					Total:     totalComputers,
+					Percent:   percent,
+					Success:   successText,
+					Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+				}:
+				default:
 				}
 			}
 		}
@@ -590,17 +592,373 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 		}
 	}
 
-	// Close jobs channel and wait for workers to finish
+	// Send final update
+	if bh.RemoteCollectionUpdates != nil {
+		finalCount := int(entryCount.Load())
+		finalValid := int(validCount.Load())
+		elapsed := time.Since(startTime)
+		var percent float64
+		if totalComputers > 0 {
+			percent = float64(finalCount) / float64(totalComputers) * 100.0
+		}
+
+		// Calculate average speed
+		var avgSpeedText string
+		if elapsed.Seconds() > 0 {
+			avgRate := float64(finalCount) / elapsed.Seconds()
+			avgSpeedText = fmt.Sprintf("%.0f/s", avgRate)
+		} else {
+			avgSpeedText = "-"
+		}
+
+		// Show valid computers as success metric
+		successText := formatSuccessRate(finalValid, finalCount)
+
+		bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+			Step:      step,
+			Processed: finalCount,
+			Total:     totalComputers,
+			Percent:   percent,
+			AvgSpeed:  avgSpeedText,
+			Success:   successText,
+			Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+		}
+	}
+
+	return targets
+}
+
+// checkComputerAvailability runs availability checks on computers
+func (bh *BH) checkComputerAvailability(step int, computers []CollectionTarget, collector *RemoteCollector) []CollectionTarget {
+	enabledChecks := bh.RuntimeOptions.GetAvailabilityChecks()
+
+	// If empty map, skip all checks - return all computers
+	if len(enabledChecks) == 0 {
+		bh.log("🦘 Skipping availability checks (empty list in config)")
+
+		// Mark step as skipped
+		if bh.RemoteCollectionUpdates != nil {
+			bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+				Step:      step,
+				Processed: len(computers),
+				Total:     len(computers),
+				Percent:   100.0,
+				Success:   fmt.Sprintf("%d/%d (100.0%%)", len(computers), len(computers)),
+				Status:    "skipped",
+			}
+		}
+
+		return computers
+	}
+
+	totalComputers := len(computers)
+	startTime := time.Now()
+
+	// Counting strategy overview:
+	// - Phase 1 (instant checks): Process all computers synchronously
+	// - Phase 2 (port scans): Process only computers that passed instant checks in parallel
+	// - Total processed = computers that failed instant checks + completed port scans
+	// - Available = computers that passed both instant checks AND port scans
+
+	// Step 1: Run instant checks synchronously
+	// These are cheap checks (OS version, last logon time, etc.)
+	// that filter out obviously unavailable computers
+	var afterInstantChecks []CollectionTarget
+	for _, computer := range computers {
+		ok, errMsg := checkInstantAvailability(
+			computer.OperatingSystem,
+			computer.PwdLastSet,
+			computer.LastLogonTimestamp,
+			enabledChecks,
+		)
+
+		if ok {
+			afterInstantChecks = append(afterInstantChecks, computer)
+		} else {
+			bh.logVerbose("🦘 [yellow]Skipping %s: %s[-]", computer.DNSHostName, errMsg)
+		}
+	}
+
+	// If port scan is not enabled, we're done
+	if !enabledChecks["smb_port_scan"] {
+		// Send final update
+		if bh.RemoteCollectionUpdates != nil {
+			finalProcessed := totalComputers // All computers were checked via instant checks
+			finalAvailable := len(afterInstantChecks)
+			elapsed := time.Since(startTime)
+			var percent float64
+			if totalComputers > 0 {
+				percent = 100.0 // All instant checks completed
+			}
+
+			successText := formatSuccessRate(finalAvailable, finalProcessed)
+
+			bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+				Step:      step,
+				Processed: finalProcessed,
+				Total:     totalComputers,
+				Percent:   percent,
+				Success:   successText,
+				AvgSpeed:  "-",
+				Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+			}
+		}
+
+		bh.log("✅ Availability checks passed for %d/%d computers", len(afterInstantChecks), totalComputers)
+		return afterInstantChecks
+	}
+
+	// Step 2: Run port scans concurrently with worker pool
+	// Only computers that passed instant checks are port scanned
+	var available []CollectionTarget
+	availableCount := atomic.Int32{} // Tracks computers that passed port scan
+
+	// Progress tracking: We need to show progress across both phases
+	// totalProcessedCount = computers that failed instant checks + port scans completed
+	totalProcessedCount := atomic.Int32{}
+	totalProcessedCount.Store(int32(totalComputers - len(afterInstantChecks))) // Initialize with instant check failures
+
+	// Create channels for port scan jobs
+	jobs := make(chan CollectionTarget, bh.RemoteWorkers*2)
+	results := make(chan CollectionTarget, bh.RemoteWorkers*2)
+
+	// Start port scan worker pool
+	var wg sync.WaitGroup
+	ctx := context.Background()
+	for w := 0; w < bh.RemoteWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				if bh.IsAborted() {
+					continue
+				}
+
+				ok, errMsg := collector.smbPortCheck(ctx, job.DNSHostName)
+				totalProcessedCount.Add(1) // Increment overall progress (instant failures + port scans done)
+
+				if ok {
+					availableCount.Add(1) // Computer passed both instant checks AND port scan
+					results <- job
+				} else {
+					bh.logVerbose("🦘 [yellow]Skipping %s: %s[-]", job.DNSHostName, errMsg)
+				}
+
+				// Send progress update
+				if bh.RemoteCollectionUpdates != nil {
+					currentProcessed := int(totalProcessedCount.Load())
+					currentAvailable := int(availableCount.Load())
+					elapsed := time.Since(startTime)
+
+					var percent float64
+					if totalComputers > 0 {
+						percent = float64(currentProcessed) / float64(totalComputers) * 100.0
+					}
+
+					successText := formatSuccessRate(currentAvailable, currentProcessed)
+
+					select {
+					case bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+						Step:      step,
+						Processed: currentProcessed,
+						Total:     totalComputers,
+						Percent:   percent,
+						Success:   successText,
+						Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+					}:
+					default:
+					}
+				}
+			}
+		}()
+	}
+
+	// Start result collector
+	done := make(chan struct{})
+	var mu sync.Mutex
+	go func() {
+		for result := range results {
+			mu.Lock()
+			available = append(available, result)
+			mu.Unlock()
+		}
+		close(done)
+	}()
+
+	// Feed port scan jobs to workers
+	for _, computer := range afterInstantChecks {
+		if bh.IsAborted() {
+			break
+		}
+		jobs <- computer
+	}
+
 	close(jobs)
 	wg.Wait()
 	close(results)
 	<-done
 
-	// Stop progress updater
-	close(progressDone)
+	// Send final update
+	if bh.RemoteCollectionUpdates != nil {
+		finalAvailable := int(availableCount.Load())
+		elapsed := time.Since(startTime)
 
-	if bh.IsAborted() {
-		return targets
+		// All computers were processed (instant checks + port scans)
+		finalProcessed := totalComputers
+
+		var percent float64
+		if totalComputers > 0 {
+			percent = 100.0
+		}
+
+		successText := formatSuccessRate(finalAvailable, finalProcessed)
+
+		var avgSpeedText string
+		if elapsed.Seconds() > 0 {
+			avgRate := float64(finalProcessed) / elapsed.Seconds()
+			avgSpeedText = fmt.Sprintf("%.0f/s", avgRate)
+		} else {
+			avgSpeedText = "-"
+		}
+
+		bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+			Step:      step,
+			Processed: finalProcessed,
+			Total:     totalComputers,
+			Percent:   percent,
+			Success:   successText,
+			AvgSpeed:  avgSpeedText,
+			Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+		}
+	}
+
+	bh.log("✅ Availability checks passed for %d/%d computers", len(available), totalComputers)
+	return available
+}
+
+// performDNSLookups performs DNS lookups on computers and returns those with valid IPs
+func (bh *BH) performDNSLookups(step int, computers []CollectionTarget) []CollectionTarget {
+	var targets []CollectionTarget
+	totalComputers := len(computers)
+
+	startTime := time.Now()
+	processedCount := atomic.Int32{}
+	successCount := atomic.Int32{}
+
+	// Create channels for job distribution
+	jobs := make(chan CollectionTarget, bh.DNSWorkers*2)
+	results := make(chan CollectionTarget, bh.DNSWorkers*2)
+
+	// Start DNS worker pool
+	var wg sync.WaitGroup
+	for w := 0; w < bh.DNSWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				if bh.IsAborted() {
+					continue
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), config.DNS_LOOKUP_TIMEOUT)
+				addrs, err := bh.Resolver.LookupHost(ctx, job.DNSHostName)
+				cancel()
+
+				processedCount.Add(1)
+
+				if err == nil && len(addrs) > 0 {
+					successCount.Add(1)
+					// Update with IP address
+					job.IPAddress = addrs[0]
+					results <- job
+				} else {
+					bh.logVerbose("🫠 [yellow]Could not resolve %s: %v[-]", job.DNSHostName, err)
+				}
+
+				// Send progress update
+				if bh.RemoteCollectionUpdates != nil {
+					currentProcessed := int(processedCount.Load())
+					currentSuccess := int(successCount.Load())
+					elapsed := time.Since(startTime)
+
+					var percent float64
+					if totalComputers > 0 {
+						percent = float64(currentProcessed) / float64(totalComputers) * 100.0
+					}
+
+					successText := formatSuccessRate(currentSuccess, currentProcessed)
+
+					select {
+					case bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+						Step:      step,
+						Processed: currentProcessed,
+						Total:     totalComputers,
+						Percent:   percent,
+						Success:   successText,
+						Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+					}:
+					default:
+					}
+				}
+			}
+		}()
+	}
+
+	// Start result collector
+	done := make(chan struct{})
+	var targetsMu sync.Mutex
+	go func() {
+		for result := range results {
+			targetsMu.Lock()
+			targets = append(targets, result)
+			targetsMu.Unlock()
+		}
+		close(done)
+	}()
+
+	// Feed jobs to workers
+	for _, computer := range computers {
+		if bh.IsAborted() {
+			break
+		}
+		jobs <- computer
+	}
+
+	close(jobs)
+	wg.Wait()
+	close(results)
+	<-done
+
+	// Send final update
+	if bh.RemoteCollectionUpdates != nil {
+		finalProcessed := int(processedCount.Load())
+		finalSuccess := int(successCount.Load())
+		elapsed := time.Since(startTime)
+		var percent float64
+		if totalComputers > 0 {
+			percent = float64(finalProcessed) / float64(totalComputers) * 100.0
+		}
+
+		successText := formatSuccessRate(finalSuccess, finalProcessed)
+
+		// Calculate average speed
+		var avgSpeedText string
+		if elapsed.Seconds() > 0 {
+			avgRate := float64(finalProcessed) / elapsed.Seconds()
+			avgSpeedText = fmt.Sprintf("%.0f/s", avgRate)
+		} else {
+			avgSpeedText = "-"
+		}
+
+		bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+			Step:      step,
+			Processed: finalProcessed,
+			Total:     totalComputers,
+			Percent:   percent,
+			Success:   successText,
+			AvgSpeed:  avgSpeedText,
+			Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+		}
 	}
 
 	return targets
@@ -609,7 +967,7 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 // collectComputerData collects data from computers using worker pool
 func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collector *RemoteCollector) {
 	numWorkers := bh.RemoteWorkers
-	timeout := bh.RemoteTimeout
+	timeout := bh.RemoteComputerTimeout
 
 	// Create output file
 	remoteResultsFile := filepath.Join(bh.ActiveFolder, "RemoteComputers.msgpack")
@@ -620,22 +978,15 @@ func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collec
 	}
 	defer outFile.Close()
 
-	encoder := msgpack.NewEncoder(outFile)
-	var encoderMu sync.Mutex
+	// Use buffered writer for better encoding performance
+	bufWriter := bufio.NewWriterSize(outFile, 1024*1024) // 1MB buffer
+	defer bufWriter.Flush()
+
+	encoder := msgpack.NewEncoder(bufWriter)
 
 	// Setup worker pool
-	type collectionTask struct {
-		target CollectionTarget
-	}
-
-	targetChan := make(chan collectionTask, numWorkers*2)
-	resultChan := make(chan struct {
-		sid    string
-		result RemoteCollectionResult
-	}, numWorkers*2)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	targetChan := make(chan CollectionTarget)
+	resultChan := make(chan RemoteCollectionResult, bh.RemoteWriteBuff)
 
 	var wg sync.WaitGroup
 
@@ -645,23 +996,16 @@ func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collec
 		go func(workerID int) {
 			defer wg.Done()
 
-			for task := range targetChan {
+			for target := range targetChan {
 				if bh.IsAborted() {
 					return
 				}
 
-				collectionCtx, collectionCancel := context.WithTimeout(ctx, timeout)
-				result := collector.CollectRemoteComputer(collectionCtx, task.target)
+				collectionCtx, collectionCancel := context.WithTimeout(context.Background(), timeout)
+				result := collector.CollectRemoteComputerWithContext(collectionCtx, target)
 				collectionCancel()
 
-				select {
-				case resultChan <- struct {
-					sid    string
-					result RemoteCollectionResult
-				}{sid: task.target.SID, result: result}:
-				case <-ctx.Done():
-					return
-				}
+				resultChan <- result
 			}
 		}(i)
 	}
@@ -670,10 +1014,8 @@ func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collec
 	workersDone := make(chan struct{})
 	var processedCount int
 	var successCount int
-	var finalAvgRate float64
-	var finalElapsed time.Duration
 
-	go bh.processComputerResults(step, resultChan, workersDone, encoder, &encoderMu, computers, &processedCount, &successCount, &finalAvgRate, &finalElapsed)
+	go bh.processComputerResults(step, resultChan, workersDone, encoder, computers, &processedCount, &successCount)
 
 	// Feed targets to workers
 	go func() {
@@ -681,11 +1023,7 @@ func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collec
 			if bh.IsAborted() {
 				break
 			}
-			select {
-			case targetChan <- collectionTask{target: target}:
-			case <-ctx.Done():
-				return
-			}
+			targetChan <- target
 		}
 		close(targetChan)
 	}()
@@ -709,8 +1047,6 @@ func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collec
 		return
 	}
 
-	// Update final status
-	bh.finalizeComputerCollection(step, len(computers), successCount, finalElapsed)
 	if fileInfo, err := os.Stat(remoteResultsFile); err == nil {
 		bh.log("✅ Computer results saved to: %s (%s)", remoteResultsFile, formatFileSize(fileInfo.Size()))
 	} else {
@@ -718,126 +1054,112 @@ func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collec
 	}
 }
 
-func (bh *BH) checkAnyRpcSuccess(result RemoteCollectionResult) bool {
+func (bh *BH) checkAnyComputerSuccess(result RemoteCollectionResult) bool {
 	// Kind of a hacky way to check if "any relevant call succeeded"
 	// but for now it works :)
-	if result.Sessions.Collected ||
-		result.PrivilegedSessions.Collected ||
-		result.RegistrySessions.Collected ||
-		result.NTLMRegistryData.Collected ||
-		result.IsWebClientRunning.Collected ||
-		result.DCRegistryData.CertificateMappingMethods != nil ||
-		result.DCRegistryData.StrongCertificateBindingEnforcement != nil ||
-		result.DCRegistryData.VulnerableNetlogonSecurityDescriptor != nil {
+	if result.Sessions.Collected {
+		return true
+	}
+	if result.PrivilegedSessions.Collected {
+		return true
+	}
+	if len(result.LocalGroups) > 0 && result.LocalGroups[0].Collected {
+		return true
+	}
+	if result.RegistrySessions.Collected {
+		return true
+	}
+	if len(result.UserRights) > 0 && result.UserRights[0].Collected {
+		return true
+	}
+	if result.NTLMRegistryData.Collected {
+		return true
+	}
+	if result.IsWebClientRunning.Collected {
 		return true
 	}
 
-	if len(result.UserRights) > 0 {
-		if result.UserRights[0].Collected {
-			return true
-		}
-	}
+	return result.DCRegistryData.CertificateMappingMethods != nil ||
+		result.DCRegistryData.StrongCertificateBindingEnforcement != nil ||
+		result.DCRegistryData.VulnerableNetlogonSecurityDescriptor != nil
+}
 
-	if len(result.LocalGroups) > 0 {
-		if result.LocalGroups[0].Collected {
-			return true
-		}
+func (bh *BH) checkAnyCASuccess(result EnterpriseCARemoteCollectionResult) bool {
+	// Check if any CA data collection succeeded
+	if result.CARegistryData.CASecurity.Collected {
+		return true
 	}
-
+	if result.CARegistryData.EnrollmentAgentRestrictions.Collected {
+		return true
+	}
+	if result.CARegistryData.IsUserSpecifiesSanEnabled.Collected {
+		return true
+	}
+	if result.CARegistryData.IsRoleSeparationEnabled.Collected {
+		return true
+	}
+	if len(result.HttpEnrollmentEndpoints) > 0 && result.HttpEnrollmentEndpoints[0].Collected {
+		return true
+	}
 	return false
 }
 
 // processComputerResults handles result processing from collection workers
-func (bh *BH) processComputerResults(step int, resultChan chan struct {
-	sid    string
-	result RemoteCollectionResult
-}, done chan struct{}, encoder *msgpack.Encoder, encoderMu *sync.Mutex,
-	computers []CollectionTarget, processedCount, successCount *int,
-	finalAvgRate *float64, finalElapsed *time.Duration) {
+func (bh *BH) processComputerResults(step int, resultChan chan RemoteCollectionResult, done chan struct{}, encoder *msgpack.Encoder,
+	computers []CollectionTarget, processedCount, successCount *int) {
 
 	defer close(done)
 	startTime := time.Now()
-	lastCheckTime := startTime
-	lastProcessedCount := 0
+	lastUpdateTime := startTime
+	lastCount := 0
 
-	resultBuffer := make(map[string]RemoteCollectionResult, bh.RemoteWriteBuff)
+	// Track seen SIDs to prevent duplicates
+	seenSIDs := make(map[string]bool)
 
 	for res := range resultChan {
-		*processedCount++
-
-		// Buffer results
-		resultBuffer[res.sid] = res.result
-
-		// Flush buffer when full
-		if len(resultBuffer) >= bh.RemoteWriteBuff {
-			encoderMu.Lock()
-			if err := encoder.Encode(resultBuffer); err != nil {
-				bh.log("Failed to write results: %v", err)
+		// Encode result only if not seen before
+		if !seenSIDs[res.SID] {
+			seenSIDs[res.SID] = true
+			if err := encoder.Encode(res); err != nil {
+				bh.log("Failed to encode result: %v", err)
 			}
-			encoderMu.Unlock()
-			resultBuffer = make(map[string]RemoteCollectionResult, bh.RemoteWriteBuff)
 		}
 
+		*processedCount++
+
 		// Count successes
-		if bh.checkAnyRpcSuccess(res.result) {
+		if bh.checkAnyComputerSuccess(res) {
 			*successCount++
 		}
 
 		// Progress reporting
-		if *processedCount%1 == 0 {
-			now := time.Now()
-			elapsed := now.Sub(startTime)
-			avgRate := float64(*processedCount) / elapsed.Seconds()
+		elapsed := time.Since(startTime)
+		metrics := calculateProgressMetrics(*processedCount, len(computers), startTime, &lastUpdateTime, &lastCount)
 
-			timeSinceLastCheck := now.Sub(lastCheckTime)
-			processSinceLastCheck := *processedCount - lastProcessedCount
-			instRate := float64(processSinceLastCheck) / timeSinceLastCheck.Seconds()
+		progressPercent := float64(*processedCount) / float64(len(computers)) * 100.0
 
-			lastCheckTime = now
-			lastProcessedCount = *processedCount
+		// Calculate success percentage relative to already-processed entries
+		var successPercent float64
+		if *processedCount > 0 {
+			successPercent = float64(*successCount) / float64(*processedCount) * 100.0
+		}
 
-			remaining := len(computers) - *processedCount
-			var eta time.Duration
-			if avgRate > 0 {
-				eta = time.Duration(float64(remaining)/avgRate) * time.Second
-			}
-
-			progressPercent := float64(*processedCount) / float64(len(computers)) * 100.0
-			successPercent := float64(*successCount) / float64(len(computers)) * 100.0
-
-			// Send channel update
-			if bh.RemoteCollectionUpdates != nil {
-				bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
-					Step:      step,
-					Processed: *processedCount,
-					Total:     len(computers),
-					Percent:   progressPercent,
-					Speed:     fmt.Sprintf("%.1f/s", instRate),
-					AvgSpeed:  fmt.Sprintf("%.1f/s", avgRate),
-					Success:   fmt.Sprintf("%d/%d (%.1f%%)", *successCount, len(computers), successPercent),
-					ETA:       eta.Round(time.Second).String(),
-					Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
-				}
+		// Send channel update
+		if bh.RemoteCollectionUpdates != nil {
+			select {
+			case bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
+				Step:      step,
+				Processed: *processedCount,
+				Total:     len(computers),
+				Percent:   progressPercent,
+				Speed:     metrics.speedText,
+				AvgSpeed:  metrics.avgSpeedText,
+				Success:   fmt.Sprintf("%d/%d (%.1f%%)", *successCount, *processedCount, successPercent),
+				ETA:       metrics.etaText,
+				Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+			}:
+			default:
 			}
 		}
 	}
-
-	// Flush remaining buffer
-	if len(resultBuffer) > 0 {
-		encoderMu.Lock()
-		if err := encoder.Encode(resultBuffer); err != nil {
-			bh.log("Failed to write final results: %v", err)
-		}
-		encoderMu.Unlock()
-	}
-
-	// Calculate final stats
-	totalElapsed := time.Since(startTime)
-	*finalAvgRate = float64(len(computers)) / totalElapsed.Seconds()
-	*finalElapsed = totalElapsed
-}
-
-// finalizeComputerCollection finalizes computer collection statistics
-func (bh *BH) finalizeComputerCollection(step, total, success int, elapsed time.Duration) {
-	// Final update sent via runRemoteStep
 }

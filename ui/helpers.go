@@ -7,12 +7,12 @@ import (
 	"github.com/Macmod/flashingestor/config"
 )
 
-// padSpeed pads a speed string to 8 characters for consistent table width
-func padSpeed(speed string) string {
-	if len(speed) < 8 {
-		return fmt.Sprintf("%-8s", speed)
+// padString pads a string to the specified width for consistent table alignment
+func padString(s string, width int) string {
+	if len(s) < width {
+		return fmt.Sprintf("%-*s", width, s)
 	}
-	return speed
+	return s
 }
 
 // SwitchToPage switches between the progress tracker pages
@@ -36,7 +36,8 @@ func (app *Application) UpdateLog(message string) {
 	currentTime := time.Now()
 	formattedTime := currentTime.Format("2006-01-02 15:04:05")
 
-	go app.QueueUpdateDraw(func() {
+	// Called from logger goroutine
+	app.QueueUpdateDraw(func() {
 		fmt.Fprintf(app.logPanel, "[white][%s][-] %s\n", formattedTime, message)
 		app.logPanel.ScrollToEnd()
 	})

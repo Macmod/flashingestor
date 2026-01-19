@@ -57,25 +57,30 @@ func (app *Application) SetupConversionTable() {
 // row: 1=Cache Loading, 2=Schema Loading, 3=Domain Processing, 4-9=Object conversions
 // Columns: 0=Status, 1=Step, 2=Processed, 3=Percent, 4=Speed, 5=Avg Speed, 6=ETA, 7=Elapsed
 func (app *Application) UpdateConversionRow(row int, status, processed, percent, speed, avgSpeed, eta, elapsed string) {
-	if status != "" {
-		app.conversionPage.SetCell(row, 0, tview.NewTableCell(status))
-	}
-	if processed != "" {
-		app.conversionPage.SetCell(row, 2, tview.NewTableCell(processed))
-	}
-	if percent != "" {
-		app.conversionPage.SetCell(row, 3, tview.NewTableCell(percent))
-	}
-	if speed != "" {
-		app.conversionPage.SetCell(row, 4, tview.NewTableCell(padSpeed(speed)))
-	}
-	if avgSpeed != "" {
-		app.conversionPage.SetCell(row, 5, tview.NewTableCell(avgSpeed))
-	}
-	if eta != "" {
-		app.conversionPage.SetCell(row, 6, tview.NewTableCell(eta))
-	}
-	if elapsed != "" {
-		app.conversionPage.SetCell(row, 7, tview.NewTableCell(elapsed))
-	}
+	// Called from background goroutines,
+	// use QueueUpdate+RequestDraw for throttling
+	app.QueueUpdate(func() {
+		if status != "" {
+			app.conversionPage.SetCell(row, 0, tview.NewTableCell(status))
+		}
+		if processed != "" {
+			app.conversionPage.SetCell(row, 2, tview.NewTableCell(processed))
+		}
+		if percent != "" {
+			app.conversionPage.SetCell(row, 3, tview.NewTableCell(percent))
+		}
+		if speed != "" {
+			app.conversionPage.SetCell(row, 4, tview.NewTableCell(padString(speed, 8)))
+		}
+		if avgSpeed != "" {
+			app.conversionPage.SetCell(row, 5, tview.NewTableCell(avgSpeed))
+		}
+		if eta != "" {
+			app.conversionPage.SetCell(row, 6, tview.NewTableCell(eta))
+		}
+		if elapsed != "" {
+			app.conversionPage.SetCell(row, 7, tview.NewTableCell(elapsed))
+		}
+		app.RequestDraw()
+	})
 }

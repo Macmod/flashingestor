@@ -80,7 +80,10 @@ func newBaseRPC(ctx context.Context, targetHost string, auth *config.CredentialM
 		return BaseRPC{}, fmt.Errorf("failed to get auth options: %w", err)
 	}
 
-	/* TODO (Future): Review if the endpoint mapper is really needed */
+	/*
+		TODO (Future): Review if the endpoint mapper is really needed
+		At least for some flavors of RPCs that we need, using the well known endpoints is not enough.
+	*/
 	epm := epm.EndpointMapper(ctx,
 		net.JoinHostPort(target.AddressWithoutPort(), "135"),
 		dcerpc.WithInsecure(),
