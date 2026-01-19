@@ -21,7 +21,9 @@ The main goals of this project are:
 2. Be faster, less noisy, and more customizable than other collectors
 3. Be a friendly TUI (terminal user interface) with progress tracking
 
-This is still a *beta* version, released just to demonstrate the concept - don't expect everything to work perfectly. If you find any bugs please contribute with issues, PRs or discussions 🙂
+# Demo
+
+<a href="https://asciinema.org/a/bJMOlPe5F4mFLY0Rl6fiJSOp3" target="_blank"><img src="https://asciinema.org/a/bJMOlPe5F4mFLY0Rl6fiJSOp3.svg" /></a>
 
 # Implementation Details
 
