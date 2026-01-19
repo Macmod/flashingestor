@@ -23,7 +23,7 @@ The main goals of this project are:
 
 # Demo
 
-<a href="https://asciinema.org/a/bJMOlPe5F4mFLY0Rl6fiJSOp3" target="_blank"><img src="https://asciinema.org/a/bJMOlPe5F4mFLY0Rl6fiJSOp3.svg" /></a>
+<a href="https://asciinema.org/a/9P6X31HKvzIW5Twa" target="_blank"><img src="https://asciinema.org/a/9P6X31HKvzIW5Twa.svg" /></a>
 
 # Implementation Details
 
