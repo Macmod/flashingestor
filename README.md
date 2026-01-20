@@ -35,7 +35,7 @@ The main goals of this project are:
 
 - **Convert** (`Ctrl+s`) - Reads the intermediate files into memory, merges information from the ingestion and remote collection steps, and generates a Bloodhound-compatible dump under `output/bloodhound` - this step is entirely offline.
 
-> [!INFO]
+> [!NOTE]
 > The main difference resource-wise is that `flashingestor` needs a bit more space to store the intermediate `msgpack` files, and it takes a bit of time to convert them into BloodHound format, but the active steps `Ingest` & `Remote` *should* be relatively efficient in terms of traffic, CPU & memory.
 
 # Installation
@@ -50,7 +50,7 @@ $ go build ./cmd/flashingestor
 $ go install ./cmd/flashingestor
 ```
 
-> [!INFO]
+> [!NOTE]
 > You can also use pre-built binaries from the provided [Releases](https://github.com/Macmod/flashingestor/releases).
 
 # Usage
@@ -104,7 +104,7 @@ If the config file is not present under the current directory as `config.yaml` o
 
 ## Ingestion
 
-> [!INFO]
+> [!NOTE]
 > The default queries in the provided `config.yaml` are designed with information needed by Bloodhound conversion in mind. You may choose to customize queries or attributes in `config.yaml`, but it's best to try to avoid removing needed attributes, and to avoid changing the meaning of the search filters.
 
 If `recurse_trusts` is set to `true`, it'll try to ingest any trusted domains found recursively with the initial credential provided for ingestion.
