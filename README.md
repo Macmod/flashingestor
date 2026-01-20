@@ -126,7 +126,7 @@ A local admin can also be used for remote collection by specifying `--remote-use
 The options `compress_output` and `cleanup_after_compression` can help keep the disk usage small. After loading the final dump in Bloodhound you can safely delete the files under `output/ldap` and `output/remote` manually if you don't have an use for them, but an interesting use case is keeping these files to look up important information and to avoid having to run the full collection from time to time.
 
 > [!TIP]
-> The primary purpose of the `msgpack` files under the `output/ldap` and `output/remote` files is to serve as an intermediary format to segregate responsibilities for the entire process, but these files can also be used as a source of information by converting them to JSON - this way you don't have to look up raw object attributes or remote collection results:
+> The primary purpose of the `msgpack` files under the `output/ldap` and `output/remote` folders is to serve as an intermediary format to segregate responsibilities for the entire process, but these files can also be used as a source of information by converting them to JSON - this way you don't have to look up raw object attributes or remote collection results:
 > ```
 > $ go build ./cmd/ingest2json
 > $ ./ingest2json -in output/ldap/YOURDOMAIN/SelectedFile.msgpack  -out output.json
