@@ -126,6 +126,12 @@ func BuildDomainFromEntry(domainEntry *gildap.LDAPEntry, trustEntries []gildap.L
 
 	domain.Properties.IsACLProtected = domain.IsACLProtected
 
+	forestRootName := BState().GetForestRoot(domainName)
+	forestRootIdentifier, ok := BState().DomainSIDCache.Get(forestRootName)
+	if ok {
+		domain.ForestRootIdentifier = forestRootIdentifier
+	}
+
 	// --- Collect: Trusts ---
 	for _, trustEntry := range trustEntries {
 		trustAttributesStr := trustEntry.GetAttrVal("trustAttributes", "0")

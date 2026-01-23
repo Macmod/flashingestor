@@ -142,8 +142,8 @@ type Domain struct {
 	Links                []GPLinkRef      `json:"Links"`
 	ChildObjects         []TypedPrincipal `json:"ChildObjects"`
 	GPOChanges           GPOChanges       `json:"GPOChanges"`
-	InheritanceHashes    []string         `json:"InheritanceHashes"`              // TODO: Fill
-	ForestRootIdentifier string           `json:"ForestRootIdentifier,omitempty"` // TODO: Fill
+	InheritanceHashes    []string         `json:"InheritanceHashes"` // TODO: Fill
+	ForestRootIdentifier string           `json:"ForestRootIdentifier,omitempty"`
 }
 
 // DomainProperties holds metadata about the domain.
