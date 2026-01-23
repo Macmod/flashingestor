@@ -67,5 +67,9 @@ func BuildContainerFromEntry(entry *gildap.LDAPEntry) (*Container, bool) {
 		}
 	}
 
+	// --- Populate InheritanceHashes ---
+	securityDescriptor := entry.GetAttrRawVal("nTSecurityDescriptor", nil)
+	container.InheritanceHashes = GetInheritedAceHashes(securityDescriptor)
+
 	return container, true
 }

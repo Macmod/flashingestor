@@ -142,7 +142,7 @@ type Domain struct {
 	Links                []GPLinkRef      `json:"Links"`
 	ChildObjects         []TypedPrincipal `json:"ChildObjects"`
 	GPOChanges           GPOChanges       `json:"GPOChanges"`
-	InheritanceHashes    []string         `json:"InheritanceHashes"` // TODO: Fill
+	InheritanceHashes    []string         `json:"InheritanceHashes"`
 	ForestRootIdentifier string           `json:"ForestRootIdentifier,omitempty"`
 }
 
@@ -170,10 +170,11 @@ type DomainTrust struct {
 // OrganizationalUnit represents an AD OU with nested properties and linked GPOs.
 type OrganizationalUnit struct {
 	BaseADObject
-	Properties   OUProperties     `json:"Properties"`
-	Links        []GPLinkRef      `json:"Links"`
-	ChildObjects []TypedPrincipal `json:"ChildObjects"`
-	GPOChanges   GPOChanges       `json:"GPOChanges"`
+	Properties        OUProperties     `json:"Properties"`
+	Links             []GPLinkRef      `json:"Links"`
+	ChildObjects      []TypedPrincipal `json:"ChildObjects"`
+	GPOChanges        GPOChanges       `json:"GPOChanges"`
+	InheritanceHashes []string         `json:"InheritanceHashes"`
 }
 
 // OUProperties contains the OU-specific metadata.
@@ -212,8 +213,9 @@ type GPOProperties struct {
 // Container represents an Active Directory container (e.g., CN=Users, CN=Computers).
 type Container struct {
 	BaseADObject
-	Properties   ContainerProperties `json:"Properties"`
-	ChildObjects []TypedPrincipal    `json:"ChildObjects"`
+	Properties        ContainerProperties `json:"Properties"`
+	ChildObjects      []TypedPrincipal    `json:"ChildObjects"`
+	InheritanceHashes []string            `json:"InheritanceHashes"`
 }
 
 // ContainerProperties holds AD metadata for the container.

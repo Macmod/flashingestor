@@ -616,3 +616,67 @@ func IsAdminSDHolderProtected(securityDescriptor []byte, adminSdHolderHash, obje
 	// Case-insensitive comparison
 	return strings.EqualFold(objectHash, adminSdHolderHash), nil
 }
+
+// GetInheritedAceHashes calculates inheritance hashes from ACEs that will be inherited down the tree
+// This function processes the security descriptor and returns unique inheritance hashes
+// from ACEs that have inheritance flags set
+func GetInheritedAceHashes(securityDescriptor []byte) []string {
+	if len(securityDescriptor) == 0 {
+		return nil
+	}
+
+	sd := security.NewSecurityDescriptor()
+	_, err := sd.Unmarshal(securityDescriptor)
+	if err != nil {
+		return nil
+	}
+
+	if sd.DACL == nil {
+		return nil
+	}
+
+	var hashes []string
+	seenHashes := make(map[string]bool)
+
+	for _, a := range sd.DACL.Entries {
+		// Skip inherited ACEs
+		if a.IsInherited() {
+			continue
+		}
+
+		// Skip deny ACEs
+		aceType := a.Header.Type.Value
+		if aceType != acetype.ACE_TYPE_ACCESS_ALLOWED && aceType != acetype.ACE_TYPE_ACCESS_ALLOWED_OBJECT {
+			continue
+		}
+
+		// Skip filtered SIDs
+		sidStr := a.Identity.SID.String()
+		if IgnoreSID(sidStr) {
+			continue
+		}
+
+		// Check if this ACE has inheritance flags set (will be inherited by children)
+		inheritanceFlags := a.Header.Flags.RawValue & (aceflags.ACE_FLAG_CONTAINER_INHERIT | aceflags.ACE_FLAG_OBJECT_INHERIT)
+		if inheritanceFlags == 0 {
+			continue
+		}
+
+		// Calculate inheritance hash for this ACE
+		hash := CalculateInheritanceHash(a)
+		if hash == "" {
+			continue
+		}
+
+		// Skip if we've already seen this hash
+		if seenHashes[hash] {
+			continue
+		}
+
+		// Add the hash
+		hashes = append(hashes, hash)
+		seenHashes[hash] = true
+	}
+
+	return hashes
+}

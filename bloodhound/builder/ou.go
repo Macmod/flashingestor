@@ -75,5 +75,9 @@ func BuildOUFromEntry(entry *gildap.LDAPEntry) (*OrganizationalUnit, bool) {
 		}
 	}
 
+	// --- Populate InheritanceHashes ---
+	securityDescriptor := entry.GetAttrRawVal("nTSecurityDescriptor", nil)
+	ou.InheritanceHashes = GetInheritedAceHashes(securityDescriptor)
+
 	return ou, true
 }

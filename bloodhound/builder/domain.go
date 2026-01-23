@@ -196,5 +196,9 @@ func BuildDomainFromEntry(domainEntry *gildap.LDAPEntry, trustEntries []gildap.L
 		}
 	}
 
+	// --- Populate InheritanceHashes ---
+	securityDescriptor := domainEntry.GetAttrRawVal("nTSecurityDescriptor", nil)
+	domain.InheritanceHashes = GetInheritedAceHashes(securityDescriptor)
+
 	return domain
 }
