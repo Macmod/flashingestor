@@ -221,6 +221,33 @@ func (opts *RuntimeOptions) GetAvailabilityChecks() map[string]bool {
 	return checks
 }
 
+// IsAnyCAMethodEnabled checks if any Enterprise CA collection methods are enabled
+func (opts *RuntimeOptions) IsAnyCAMethodEnabled() bool {
+	return opts.IsMethodEnabled("caregistry") ||
+		opts.IsMethodEnabled("certservices")
+}
+
+// IsAnyComputerMethodEnabled checks if any computer collection methods are enabled
+func (opts *RuntimeOptions) IsAnyComputerMethodEnabled() bool {
+	return opts.IsMethodEnabled("sessions") ||
+		opts.IsMethodEnabled("regsessions") ||
+		opts.IsMethodEnabled("loggedon") ||
+		opts.IsMethodEnabled("ntlmregistry") ||
+		opts.IsMethodEnabled("webclient") ||
+		opts.IsMethodEnabled("localgroups") ||
+		opts.IsMethodEnabled("userrights") ||
+		opts.IsMethodEnabled("smbinfo") ||
+		opts.IsMethodEnabled("dcregistry") ||
+		opts.IsMethodEnabled("ldapservices")
+}
+
+// HasAnyMethodsEnabled checks if any remote collection methods are enabled
+func (opts *RuntimeOptions) HasAnyMethodsEnabled() bool {
+	opts.mu.RLock()
+	defer opts.mu.RUnlock()
+	return len(opts.RemoteCollection.Methods) > 0
+}
+
 // Thread-safe setters
 func (opts *RuntimeOptions) SetVerbose(level int) {
 	opts.mu.Lock()

@@ -148,9 +148,8 @@ func (c *ParentChildCache) HasChildren(parentDN string) bool {
 	s := c.shardFor(h)
 	s.mu.RLock()
 	children, ok := s.m[h]
-	hasChildren := ok && len(children) > 0
 	s.mu.RUnlock()
-	return hasChildren
+	return ok && len(children) > 0
 }
 
 // Delete removes all children for a parent DN.
