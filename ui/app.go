@@ -251,6 +251,11 @@ func (app *Application) setupUI() {
 		}
 		if event.Key() == tcell.KeyCtrlR {
 			if !app.isRunning && app.remoteCollectionCb != nil {
+				// Check if any methods are enabled
+				if app.runtimeOptions != nil && !app.runtimeOptions.HasAnyMethodsEnabled() {
+					app.showErrorModal("No Methods Enabled", "Remote collection cannot be started because no collection methods are enabled. Please configure at least one method in the config file.")
+					return nil
+				}
 				app.showConfirmModal("Start Remote Collection?", "This will perform active collection on ALL discovered computers. Continue?", app.remoteCollectionCb)
 			}
 			return nil
@@ -324,4 +329,22 @@ func (app *Application) RequestDraw() {
 func (app *Application) StopThrottledUpdates() {
 	app.updateTicker.Stop()
 	close(app.updateStopChan)
+}
+
+// showErrorModal displays an error message with an OK button
+func (app *Application) showErrorModal(title, message string) {
+	modal := tview.NewModal().
+		SetText(message).
+		AddButtons([]string{"OK"}).
+		SetButtonStyle(tcell.StyleDefault.Background(tcell.ColorRed).Foreground(tcell.ColorWhite)).
+		SetButtonActivatedStyle(tcell.StyleDefault.Background(tcell.ColorWhite).Foreground(tcell.ColorRed)).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			// Remove the modal page
+			app.mainPages.RemovePage("modal")
+		})
+
+	modal.SetBorder(true).SetTitle(title)
+
+	// Add modal as an overlay
+	app.mainPages.AddPage("modal", modal, true, true)
 }

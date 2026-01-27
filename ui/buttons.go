@@ -27,6 +27,11 @@ func (app *Application) SetButtonCallbacks(ingestionCallback, conversionCallback
 
 	if remoteCollectionCallback != nil {
 		app.startRemoteButton.SetSelectedFunc(func() {
+			// Check if any methods are enabled
+			if app.runtimeOptions != nil && !app.runtimeOptions.HasAnyMethodsEnabled() {
+				app.showErrorModal("No Methods Enabled", "Remote collection cannot be started because no collection methods are enabled. Please configure at least one method in the config file.")
+				return
+			}
 			app.showConfirmModal("Start Remote Collection?", "This will perform active collection on ALL discovered computers. Continue?", remoteCollectionCallback)
 		})
 	}
