@@ -45,6 +45,43 @@ func ResolveSID(sid string, domainName string) TypedPrincipal {
 	return out
 }
 
+// ResolveAccountName resolves an account name (sAMAccountName or DOMAIN\sAMAccountName) to a typed principal.
+// It checks the SamCache and also tries appending $ for computer accounts.
+// Returns the typed principal and true if found, or an empty principal and false if not found.
+func ResolveAccountName(account, domainName string) (TypedPrincipal, bool) {
+	var out TypedPrincipal
+
+	// Parse DOMAIN\username format
+	var domain, user string
+	if strings.Contains(account, "\\") {
+		parts := strings.SplitN(account, "\\", 2)
+		domain = parts[0]
+		user = parts[1]
+	} else {
+		domain = domainName
+		user = account
+	}
+
+	user = strings.ToUpper(user)
+
+	// Check SamCache for the account
+	// Cache key format: "domain+sAMAccountName"
+	cacheKey := domain + "+" + user
+	if entry, ok := BState().SamCache.Get(cacheKey); ok {
+		out = entry.ToTypedPrincipal()
+		return out, true
+	}
+
+	// Try with $ suffix for computer accounts
+	cacheKeyWithDollar := domain + "+" + user + "$"
+	if entry, ok := BState().SamCache.Get(cacheKeyWithDollar); ok {
+		out = entry.ToTypedPrincipal()
+		return out, true
+	}
+
+	return out, false
+}
+
 // ResolveHostnameInCaches attempts to resolve a hostname to a computer SID
 func ResolveHostnameInCaches(host string, domain string) (string, bool) {
 	// Check if we already have this host cached in HostDnsCache
@@ -87,24 +124,6 @@ func ResolveSpn(host string, domain string) (string, bool) {
 
 	return ResolveHostnameInCaches(strippedHost, domain)
 }
-
-// IsFilteredContainerChild replicates the Python is_filtered_container_child function.
-// It checks if a child container DN should be ignored.
-/*
-func IsFilteredContainerChild(containerDN string) bool {
-	if containerDN == "" {
-		return false
-	}
-	dn := strings.ToUpper(containerDN)
-	if strings.Contains(dn, "CN=PROGRAM DATA,DC=") {
-		return true
-	}
-	if strings.Contains(dn, "CN=SYSTEM,DC=") {
-		return true
-	}
-	return false
-}
-*/
 
 /* String/parsing-related functions */
 
