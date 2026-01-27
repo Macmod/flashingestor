@@ -186,13 +186,14 @@ type OUProperties struct {
 	HighValue         bool   `json:"highvalue"`
 }
 
-// GPOChanges represents GPO-related deltas linked to this OU.
+// GPOChanges represents GPO-related deltas linked to an OU or domain.
+// (theoretically Sites too, but we don't model Sites in BloodHound)
 type GPOChanges struct {
-	AffectedComputers  []TypedPrincipal `json:"affectedcomputers"`
-	DcomUsers          []TypedPrincipal `json:"dcomusers"`
-	LocalAdmins        []TypedPrincipal `json:"localadmins"`
-	PSRemoteUsers      []TypedPrincipal `json:"psremoteusers"`
-	RemoteDesktopUsers []TypedPrincipal `json:"remotedesktopusers"`
+	AffectedComputers  []TypedPrincipal `json:"AffectedComputers"`
+	DcomUsers          []TypedPrincipal `json:"DcomUsers"`
+	LocalAdmins        []TypedPrincipal `json:"LocalAdmins"`
+	PSRemoteUsers      []TypedPrincipal `json:"PSRemoteUsers"`
+	RemoteDesktopUsers []TypedPrincipal `json:"RemoteDesktopUsers"`
 }
 
 // GPO represents a Group Policy Object in AD.
