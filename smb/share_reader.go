@@ -13,11 +13,10 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
-	"github.com/RedTeamPentesting/adauth"
+	"github.com/Macmod/flashingestor/config"
 	"github.com/RedTeamPentesting/adauth/smbauth"
 	"github.com/oiweiwei/go-smb2.fork"
 )
@@ -33,56 +32,55 @@ type shareConnection struct {
 
 // FileReader provides methods to read files from SMB shares with connection pooling
 type FileReader struct {
-	creds           *adauth.Credential
-	kerberosDialer  adauth.Dialer
-	connections     map[string]*shareConnection // key: "server:share"
-	mu              sync.RWMutex
+	auth        *config.CredentialMgr
+	connections map[string]*shareConnection // key: "server:share"
+	mu          sync.RWMutex
 }
 
 // NewFileReader creates a new SMB file reader with connection pooling
-func NewFileReader(creds *adauth.Credential, kerberosDialer adauth.Dialer) *FileReader {
+func NewFileReader(auth *config.CredentialMgr) *FileReader {
 	return &FileReader{
-		creds:          creds,
-		kerberosDialer: kerberosDialer,
-		connections:    make(map[string]*shareConnection),
+		auth:        auth,
+		connections: make(map[string]*shareConnection),
 	}
 }
 
 // getOrCreateConnection returns a cached connection or creates a new one
 func (fr *FileReader) getOrCreateConnection(ctx context.Context, server, shareName string) (*shareConnection, error) {
 	key := server + ":" + shareName
-	
+
 	// Check if we have a cached connection
 	fr.mu.RLock()
 	conn, exists := fr.connections[key]
 	fr.mu.RUnlock()
-	
+
 	if exists {
 		return conn, nil
 	}
-	
+
 	// Create new connection
 	fr.mu.Lock()
 	defer fr.mu.Unlock()
-	
+
 	// Double-check after acquiring write lock
 	if conn, exists := fr.connections[key]; exists {
 		return conn, nil
 	}
-	
+
 	// Create target and SMB dialer
-	target := adauth.NewTarget("host", server)
+	target := fr.auth.NewTarget("host", server)
 	target.Port = "445"
 
-	smbDialer, err := smbauth.Dialer(ctx, fr.creds, target, &smbauth.Options{
-		KerberosDialer: fr.kerberosDialer,
+	smbDialer, err := smbauth.Dialer(ctx, fr.auth.Creds(), target, &smbauth.Options{
+		KerberosDialer: fr.auth.Dialer(config.KERBEROS_TIMEOUT),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("setup SMB authentication: %w", err)
 	}
 
 	// Create TCP connection
-	tcpConn, err := net.Dial("tcp", target.Address())
+	tcpConnDialer := fr.auth.Dialer(config.SMB_TIMEOUT)
+	tcpConn, err := tcpConnDialer.Dial("tcp", target.Address())
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", target.Address(), err)
 	}
@@ -101,7 +99,7 @@ func (fr *FileReader) getOrCreateConnection(ctx context.Context, server, shareNa
 		tcpConn.Close()
 		return nil, fmt.Errorf("mount share %s: %w", shareName, err)
 	}
-	
+
 	conn = &shareConnection{
 		tcpConn: tcpConn,
 		session: sess,
@@ -109,7 +107,7 @@ func (fr *FileReader) getOrCreateConnection(ctx context.Context, server, shareNa
 		server:  server,
 		name:    shareName,
 	}
-	
+
 	fr.connections[key] = conn
 	return conn, nil
 }
@@ -118,7 +116,7 @@ func (fr *FileReader) getOrCreateConnection(ctx context.Context, server, shareNa
 func (fr *FileReader) Close() {
 	fr.mu.Lock()
 	defer fr.mu.Unlock()
-	
+
 	for _, conn := range fr.connections {
 		if conn.share != nil {
 			conn.share.Umount()
@@ -130,7 +128,7 @@ func (fr *FileReader) Close() {
 			conn.tcpConn.Close()
 		}
 	}
-	
+
 	fr.connections = make(map[string]*shareConnection)
 }
 
@@ -194,23 +192,23 @@ func (fr *FileReader) FileExists(ctx context.Context, uncPath string) (bool, err
 // Input: \\server\share\path\to\file.txt or //server/share/path/to/file.txt
 // Output: server, share, path/to/file.txt
 func parseUNCPathWithServer(uncPath string) (string, string, string, error) {
-	// Normalize path separators to forward slashes
-	uncPath = filepath.ToSlash(uncPath)
-
-	// Remove leading slashes
-	uncPath = strings.TrimPrefix(uncPath, "//")
+	// Remove leading slashes (handle both \\ and //)
 	uncPath = strings.TrimPrefix(uncPath, "\\\\")
+	uncPath = strings.TrimPrefix(uncPath, "//")
 
 	// Split into parts: server/share/path/to/file
-	parts := strings.Split(uncPath, "/")
-	if len(parts) < 3 {
+	parts := strings.SplitN(uncPath, "\\", 3)
+	if len(parts) < 2 {
 		return "", "", "", fmt.Errorf("invalid UNC path: %s (expected format: \\\\server\\share\\path)", uncPath)
 	}
 
-	// Extract server (parts[0]), share (parts[1]) and path (parts[2:])
+	// Extract server (parts[0]), share (parts[1]) and path (parts[2])
 	server := parts[0]
 	shareName := parts[1]
-	filePath := strings.Join(parts[2:], "/")
+	filePath := ""
+	if len(parts) > 2 {
+		filePath = parts[2]
+	}
 
 	return server, shareName, filePath, nil
 }
