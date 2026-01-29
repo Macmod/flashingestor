@@ -144,6 +144,9 @@ func FallbackOptions() *RuntimeOptions {
 		"certservices",
 		"webclient",
 		"localgroups",
+		"ldapservices",
+		"smbinfo",
+		//"gpolocalgroup",
 	}
 
 	// Availability checks defaults

@@ -216,7 +216,7 @@ remote_collection:
   # Valid options are:
   #   userrights, dcregistry, sessions, regsessions, loggedon,
   #   ntlmregistry, caregistry, certservices, webclient, localgroups,
-  #   ldapservices, smbinfo
+  #   ldapservices, smbinfo, gpolocalgroup
   methods:
     - userrights
     - dcregistry
@@ -230,9 +230,9 @@ remote_collection:
     - localgroups
     - ldapservices
     - smbinfo
+    #- gpolocalgroup
 
   # Availability checks to run before remote collection
-  # (not yet implemented)
   #  
   # Available checks:
   #   windows_os - Only run remote collection on Windows computers
