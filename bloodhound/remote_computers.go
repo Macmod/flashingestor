@@ -80,7 +80,7 @@ func (rc *RemoteCollector) CollectRemoteComputerWithContext(ctx context.Context,
 	case result := <-resultCh:
 		return result
 	case <-ctx.Done():
-		rc.logger.Log1("[red](%s) Aborted after %v (timeout hit?)[-]", target.DNSHostName, time.Since(startTime).Round(time.Millisecond))
+		rc.logger.Log1("❌ [red][%s[] Aborted after %v (timeout hit?)[-]", target.DNSHostName, time.Since(startTime).Round(time.Millisecond))
 		return RemoteCollectionResult{}
 	}
 }
@@ -174,7 +174,7 @@ func (rc *RemoteCollector) CollectRemoteComputer(target CollectionTarget) Remote
 
 	totalTime := time.Since(totalStart)
 	if len(methodTimes) > 0 {
-		rc.logger.Log2("[%s[] Collected in %s: %s", target.DNSHostName, totalTime.Round(time.Millisecond), formatMethodTimes(methodTimes))
+		rc.logger.Log2("💻 [%s[] Collected in %s: %s", target.DNSHostName, totalTime.Round(time.Millisecond), formatMethodTimes(methodTimes))
 	}
 
 	return result
