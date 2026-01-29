@@ -291,7 +291,7 @@ func (p *CAEnrollmentProcessor) getNtlmEndpoint(
 			// No NTLM challenge offered
 			endpoint.Status = builder.CAScanNotVulnerableNoNtlmChallenge
 			if p.log != nil {
-				p.log <- fmt.Sprintf("ℹ️  No NTLM challenge at: %s", urlStr)
+				p.log <- fmt.Sprintf("🫠 [yellow]No NTLM challenge at:[-] %s", urlStr)
 			}
 		} else if useBadChannelBinding != nil && *useBadChannelBinding && parsedURL.Scheme == "https" {
 			// 401 with bad channel bindings on HTTPS means channel binding is required (not vulnerable)
@@ -300,13 +300,13 @@ func (p *CAEnrollmentProcessor) getNtlmEndpoint(
 			// A proper implementation would require more sophisticated channel binding testing.
 			endpoint.Status = builder.CAScanNotVulnerableNtlmChannelBindingRequired
 			if p.log != nil {
-				p.log <- fmt.Sprintf("ℹ️  Channel binding required at: %s", urlStr)
+				p.log <- fmt.Sprintf("ℹ🫠 [yellow]Channel binding required at:[-] %s", urlStr)
 			}
 		} else {
 			// Authentication failed but NTLM was offered
 			endpoint.Status = builder.CAScanError
 			if p.log != nil {
-				p.log <- fmt.Sprintf("[yellow]⚠  NTLM authentication failed at:[-] %s", urlStr)
+				p.log <- fmt.Sprintf("🫠 [yellow]NTLM authentication failed at:[-] %s", urlStr)
 			}
 		}
 		return builder.CAEnrollmentEndpointAPIResult{
@@ -320,7 +320,7 @@ func (p *CAEnrollmentProcessor) getNtlmEndpoint(
 		// Path is forbidden (e.g., SSL required for HTTP endpoint)
 		endpoint.Status = builder.CAScanNotVulnerablePathForbidden
 		if p.log != nil {
-			p.log <- fmt.Sprintf("ℹ️  Path forbidden: %s", urlStr)
+			p.log <- fmt.Sprintf("🫠 [yellow]Path forbidden:[-] %s", urlStr)
 		}
 		return builder.CAEnrollmentEndpointAPIResult{
 			APIResult: builder.APIResult{
@@ -333,7 +333,7 @@ func (p *CAEnrollmentProcessor) getNtlmEndpoint(
 		// Path doesn't exist
 		endpoint.Status = builder.CAScanNotVulnerablePathNotFound
 		if p.log != nil {
-			p.log <- fmt.Sprintf("ℹ️  Path not found: %s", urlStr)
+			p.log <- fmt.Sprintf("🫠 [yellow]Path not found:[-] %s", urlStr)
 		}
 		return builder.CAEnrollmentEndpointAPIResult{
 			APIResult: builder.APIResult{
@@ -349,7 +349,7 @@ func (p *CAEnrollmentProcessor) getNtlmEndpoint(
 		if parsedURL.Scheme == "https" {
 			endpoint.Status = builder.CAScanNotVulnerableEpaMisconfigured
 			if p.log != nil {
-				p.log <- fmt.Sprintf("[yellow]⚠  Possible EPA misconfiguration at:[-] %s", urlStr)
+				p.log <- fmt.Sprintf("🫠 [yellow]Possible EPA misconfiguration at:[-] %s", urlStr)
 			}
 		} else {
 			endpoint.Status = builder.CAScanError
@@ -368,7 +368,7 @@ func (p *CAEnrollmentProcessor) getNtlmEndpoint(
 		// Other status codes
 		endpoint.Status = builder.CAScanError
 		if p.log != nil {
-			p.log <- fmt.Sprintf("[yellow]⚠  Unexpected status at:[-] %s (status: %d)", urlStr, resp.StatusCode)
+			p.log <- fmt.Sprintf("🫠 [yellow]Unexpected status at:[-] %s (status: %d)", urlStr, resp.StatusCode)
 		}
 		return builder.CAEnrollmentEndpointAPIResult{
 			APIResult: builder.APIResult{

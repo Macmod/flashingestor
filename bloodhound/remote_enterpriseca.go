@@ -60,6 +60,7 @@ func (rc *RemoteCollector) collectHttpEnrollmentEndpoints(ctx context.Context, c
 // CollectRemoteEnterpriseCAWithContext wraps CollectRemoteEnterpriseCA with hard timeout enforcement.
 func (rc *RemoteCollector) CollectRemoteEnterpriseCAWithContext(ctx context.Context, target EnterpriseCACollectionTarget) EnterpriseCARemoteCollectionResult {
 	resultCh := make(chan EnterpriseCARemoteCollectionResult, 1)
+	startTime := time.Now()
 
 	go func() {
 		resultCh <- rc.CollectRemoteEnterpriseCA(target)
@@ -69,7 +70,7 @@ func (rc *RemoteCollector) CollectRemoteEnterpriseCAWithContext(ctx context.Cont
 	case result := <-resultCh:
 		return result
 	case <-ctx.Done():
-		rc.logger.Log1("[yellow](%s) CA aborted: %v[-]", target.DNSHostName, ctx.Err())
+		rc.logger.Log1("❌ [red][%s[] Aborted after %v (timeout hit?)[-]", target.DNSHostName, time.Since(startTime).Round(time.Millisecond))
 		return EnterpriseCARemoteCollectionResult{}
 	}
 }
@@ -116,7 +117,7 @@ func (rc *RemoteCollector) CollectRemoteEnterpriseCA(target EnterpriseCACollecti
 	// Log method times summary
 	if len(methodTimes) > 0 {
 		totalTime := time.Since(totalStart)
-		rc.logger.Log2("(%s) Total %s: %s", target.DNSHostName, totalTime.Round(time.Millisecond), formatMethodTimes(methodTimes))
+		rc.logger.Log2("📋 [%s[] Collected in %s: %s", target.DNSHostName, totalTime.Round(time.Millisecond), formatMethodTimes(methodTimes))
 	}
 
 	return result
