@@ -43,7 +43,7 @@ func main() {
 
 	jobManager := newJobManager()
 
-	logChannel := make(chan core.LogMessage, cfg.RemoteWorkers*2)
+	logChannel := make(chan core.LogMessage, 1000)
 
 	var logFile *os.File
 	if cfg.LogFile != "" {
