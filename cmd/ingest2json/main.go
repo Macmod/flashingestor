@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	version = "0.1.0"
+	version = "0.2.0"
 )
 
 func main() {
@@ -28,7 +28,7 @@ func main() {
 	}
 
 	if *inputFile == "" || *outputFile == "" {
-		fmt.Fprintln(os.Stderr, "Usage: ./ingest2json -in <msgpack_file> -out <json_file> [-indent]")
+		fmt.Fprintln(os.Stderr, "Usage: ./ingest2json -in <msgpack_file> -out <json_file> [-pretty]")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -47,11 +47,9 @@ func main() {
 	}
 	defer outFile.Close()
 
-	// Try to detect if it's a list or dictionary
 	totalEntries, err := mpReader.ReadLength()
 	if err != nil {
-		// Not a list, try reading as dictionary or single object
-		log.Printf("🔍 File is not a list, reading as object/dictionary...")
+		log.Printf("🔍 File is not a fixed-size list, reading as stream of objects...")
 
 		mpReader.Close()
 		mpReader, err = reader.NewMPReader(*inputFile)
@@ -60,29 +58,38 @@ func main() {
 		}
 		defer mpReader.Close()
 
-		var data interface{}
-		if err := mpReader.ReadEntry(&data); err != nil {
-			log.Fatalf("❌ Failed to read msgpack data: %v", err)
-		}
+		log.Printf("🔄 Streaming conversion to line-delimited JSON...")
+		startTime := time.Now()
 
-		log.Printf("✅ Data loaded into memory")
-		log.Printf("🔄 Converting to JSON...")
-
-		var jsonData []byte
+		encoder := json.NewEncoder(outFile)
 		if *indent {
-			jsonData, err = json.MarshalIndent(data, "", "  ")
-		} else {
-			jsonData, err = json.Marshal(data)
-		}
-		if err != nil {
-			log.Fatalf("❌ Failed to marshal JSON: %v", err)
+			encoder.SetIndent("", "  ")
 		}
 
-		if _, err := outFile.Write(jsonData); err != nil {
-			log.Fatalf("❌ Failed to write JSON: %v", err)
+		count := 0
+		for {
+			var entry interface{}
+			if err := mpReader.ReadEntry(&entry); err != nil {
+				// End of stream
+				break
+			}
+
+			// Encode the entry (encoder automatically adds newline)
+			if err := encoder.Encode(entry); err != nil {
+				log.Fatalf("❌ Failed to encode entry %d: %v", count, err)
+			}
+
+			count++
+			if count%1000 == 0 {
+				elapsed := time.Since(startTime)
+				rate := float64(count) / elapsed.Seconds()
+				log.Printf("⏳ Progress: %d entries - %.0f entries/sec", count, rate)
+			}
 		}
 
-		log.Printf("✅ Successfully converted to JSON: %s", *outputFile)
+		duration := time.Since(startTime)
+		log.Printf("✅ Successfully converted %d entries in %v", count, duration.Round(time.Millisecond))
+		log.Printf("📝 Output file: %s", *outputFile)
 		return
 	}
 
