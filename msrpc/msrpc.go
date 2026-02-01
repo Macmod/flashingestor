@@ -11,6 +11,7 @@ import (
 	"github.com/RedTeamPentesting/adauth/dcerpcauth"
 	"github.com/oiweiwei/go-msrpc/dcerpc"
 	"github.com/oiweiwei/go-msrpc/msrpc/epm/epm/v3"
+	"github.com/oiweiwei/go-msrpc/msrpc/erref/win32"
 	lsad "github.com/oiweiwei/go-msrpc/msrpc/lsad/lsarpc/v0"
 	lsat "github.com/oiweiwei/go-msrpc/msrpc/lsat/lsarpc/v0"
 	"github.com/oiweiwei/go-msrpc/msrpc/rrp/winreg/v1"
@@ -114,7 +115,7 @@ func NewWinregRPC(ctx context.Context, targetHost string, auth *config.Credentia
 		return nil, err
 	}
 
-	client, err := winreg.NewWinregClient(base.Context, base.Conn, dcerpc.WithInsecure())
+	client, err := winreg.NewWinregClient(base.Context, base.Conn, dcerpc.WithInsecure(), dcerpc.WithErrorMapper(win32.Mapper{}))
 	if err != nil {
 		base.Close()
 		return nil, fmt.Errorf("failed to bind winreg client: %w", err)
