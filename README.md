@@ -129,7 +129,7 @@ The options `compress_output` and `cleanup_after_compression` can help keep the 
 > The primary purpose of the `msgpack` files under the `output/ldap` and `output/remote` folders is to serve as an intermediary format to segregate responsibilities for the entire process, but these files can also be used as a source of information by converting them to JSON - this way you don't have to look up raw object attributes or remote collection results:
 > ```
 > $ go build ./cmd/ingest2json
-> $ ./ingest2json -in output/ldap/YOURDOMAIN/SelectedFile.msgpack  -out output.json
+> $ ./ingest2json output/ldap/YOURDOMAIN/SelectedFile.msgpack -o output.json
 > ```
 > 
 > A nice way of inspecting these files would be to use [JQ](https://jqlang.org/)/[FX](https://github.com/antonmedv/fx), or your favorite programming language 🙂

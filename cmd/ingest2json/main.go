@@ -2,40 +2,58 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Macmod/flashingestor/reader"
+	"github.com/spf13/pflag"
 )
 
 var (
-	version = "0.2.0"
+	version = "0.3.0"
 )
 
 func main() {
-	showVersion := flag.Bool("version", false, "Show version information and exit")
-	inputFile := flag.String("in", "", "Input msgpack file path (required)")
-	outputFile := flag.String("out", "", "Output JSON file path (required)")
-	indent := flag.Bool("pretty", false, "Pretty-print JSON with indentation")
-	flag.Parse()
+	showVersion := pflag.Bool("version", false, "Show version information and exit")
+	outputFile := pflag.StringP("output", "o", "", "Output JSON file path (optional, defaults to input filename with .json extension)")
+	indent := pflag.Bool("pretty", false, "Pretty-print JSON with indentation")
+	pflag.Parse()
 
 	if *showVersion {
 		fmt.Printf("ingest2json %s\n", version)
 		os.Exit(0)
 	}
 
-	if *inputFile == "" || *outputFile == "" {
-		fmt.Fprintln(os.Stderr, "Usage: ./ingest2json -in <msgpack_file> -out <json_file> [-pretty]")
-		flag.PrintDefaults()
+	// Input file is now a positional argument
+	if pflag.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: ./ingest2json <msgpack_file> [-o|--output <json_file>] [-pretty]")
+		fmt.Fprintln(os.Stderr, "\nPositional arguments:")
+		fmt.Fprintln(os.Stderr, "  <msgpack_file>    Input msgpack file path (required)")
+		fmt.Fprintln(os.Stderr, "\nOptions:")
+		pflag.PrintDefaults()
 		os.Exit(1)
 	}
 
-	log.Printf("📂 Opening msgpack file: %s", *inputFile)
+	inputFile := pflag.Arg(0)
 
-	mpReader, err := reader.NewMPReader(*inputFile)
+	// If output file not specified, use base filename in current directory
+	if *outputFile == "" {
+		baseName := filepath.Base(inputFile)
+		ext := filepath.Ext(baseName)
+		if strings.ToLower(ext) == ".msgpack" {
+			*outputFile = strings.TrimSuffix(baseName, ext) + ".json"
+		} else {
+			*outputFile = baseName + ".json"
+		}
+	}
+
+	log.Printf("📂 Opening msgpack file: %s", inputFile)
+
+	mpReader, err := reader.NewMPReader(inputFile)
 	if err != nil {
 		log.Fatalf("❌ Failed to open msgpack file: %v", err)
 	}
@@ -52,7 +70,7 @@ func main() {
 		log.Printf("🔍 File is not a fixed-size list, reading as stream of objects...")
 
 		mpReader.Close()
-		mpReader, err = reader.NewMPReader(*inputFile)
+		mpReader, err = reader.NewMPReader(inputFile)
 		if err != nil {
 			log.Fatalf("❌ Failed to reopen msgpack file: %v", err)
 		}
