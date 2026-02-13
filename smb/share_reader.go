@@ -51,14 +51,22 @@ func NewFileReader(auth *config.CredentialMgr) *FileReader {
 func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareConnection, error) {
 	key := server + ":" + shareName
 
-	// First, try to get an existing connection
-	fr.mu.Lock()
+	// Fast path: check with read lock
+	fr.mu.RLock()
 	conn, exists := fr.connections[key]
+	fr.mu.RUnlock()
 	if exists {
-		fr.mu.Unlock()
 		return conn, nil
 	}
-	fr.mu.Unlock()
+
+	// Slow path: need to create connection
+	fr.mu.Lock()
+	defer fr.mu.Unlock()
+	// Double-check: another goroutine might have created it while we waited for the lock
+	conn, exists = fr.connections[key]
+	if exists {
+		return conn, nil
+	}
 
 	// Create target and SMB dialer
 	target := fr.auth.NewTarget("host", server)
@@ -102,9 +110,7 @@ func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareCon
 		server:  server,
 		name:    shareName,
 	}
-	fr.mu.Lock()
 	fr.connections[key] = conn
-	fr.mu.Unlock()
 	return conn, nil
 }
 
