@@ -12,19 +12,25 @@ import (
 // ConversionManager handles BloodHound conversion.
 type ConversionManager struct {
 	bhInst *bloodhound.BH
+	uiApp  *ui.Application
 	logger *core.Logger
 }
 
 func newConversionManager(
 	bhInst *bloodhound.BH,
+	uiApp *ui.Application,
 	logger *core.Logger,
 ) *ConversionManager {
-	return &ConversionManager{bhInst: bhInst, logger: logger}
+	return &ConversionManager{
+		bhInst: bhInst,
+		uiApp:  uiApp,
+		logger: logger,
+	}
 }
 
-func (c *ConversionManager) start(uiApp *ui.Application) {
+func (c *ConversionManager) start() {
 	c.bhInst.ResetAbortFlag()
-	uiApp.SetAbortCallback(func() {
+	c.uiApp.SetAbortCallback(func() {
 		if c.bhInst.RequestAbort() {
 			c.logger.Log0("🛑 [red]Abort requested for BloodHound conversion...[-]")
 		}
@@ -33,32 +39,32 @@ func (c *ConversionManager) start(uiApp *ui.Application) {
 	c.logger.Log0("🔀 [cyan]Starting BloodHound conversion...[-]")
 
 	// Set up conversion table and spinner
-	uiApp.SetupConversionTable()
+	c.uiApp.SetupConversionTable()
 
 	// Create channel for conversion updates
 	conversionUpdates := make(chan core.ConversionUpdate, 2000)
 	c.bhInst.ConversionUpdates = conversionUpdates
 
 	// Create spinner for conversion table
-	spinner := ui.NewSingleTableSpinner(uiApp, uiApp.GetConversionTable(), 0)
+	spinner := ui.NewSingleTableSpinner(c.uiApp, c.uiApp.GetConversionTable(), 0)
 	spinner.Start()
 
 	// Start consumer goroutine for conversion updates
 	go func() {
 		for update := range conversionUpdates {
-			c.handleConversionUpdate(uiApp, spinner, update)
+			c.handleConversionUpdate(c.uiApp, spinner, update)
 		}
 	}()
 
 	go func() {
-		uiApp.SetRunning(true, "conversion")
+		c.uiApp.SetRunning(true, "conversion")
 
 		defer func() {
 			spinner.Stop()
 			close(conversionUpdates)
 			c.bhInst.ConversionUpdates = nil
-			uiApp.SetAbortCallback(nil)
-			uiApp.SetRunning(false, "")
+			c.uiApp.SetAbortCallback(nil)
+			c.uiApp.SetRunning(false, "")
 		}()
 
 		processStartTime := time.Now()

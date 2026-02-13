@@ -15,18 +15,18 @@ import (
 // RemoteCollectionManager handles remote data collection.
 type RemoteCollectionManager struct {
 	bhInst *bloodhound.BH
-	auth   *config.CredentialMgr
+	uiApp  *ui.Application
 	logger *core.Logger
 }
 
 func newRemoteCollectionManager(
 	bhInst *bloodhound.BH,
-	auth *config.CredentialMgr,
+	uiApp *ui.Application,
 	logger *core.Logger,
 ) *RemoteCollectionManager {
 	return &RemoteCollectionManager{
 		bhInst: bhInst,
-		auth:   auth,
+		uiApp:  uiApp,
 		logger: logger,
 	}
 }
@@ -51,9 +51,9 @@ func (r *RemoteCollectionManager) checkMsgpackFilesExist() (bool, error) {
 	return false, nil
 }
 
-func (r *RemoteCollectionManager) start(uiApp *ui.Application) {
+func (r *RemoteCollectionManager) start(auth *config.CredentialMgr, noCrossDomain bool) {
 	r.bhInst.ResetAbortFlag()
-	uiApp.SetAbortCallback(func() {
+	r.uiApp.SetAbortCallback(func() {
 		if r.bhInst.RequestAbort() {
 			r.logger.Log0("🛑 [red]Abort requested for remote collection...[-]")
 		}
@@ -66,27 +66,28 @@ func (r *RemoteCollectionManager) start(uiApp *ui.Application) {
 	r.bhInst.RemoteCollectionUpdates = remoteUpdates
 
 	// Setup UI table
-	uiApp.SetupRemoteCollectionTable()
+	r.uiApp.SetupRemoteCollectionTable(r.bhInst.RuntimeOptions)
 
 	// Start spinner for remote collection table
-	spinner := ui.NewSingleTableSpinner(uiApp, uiApp.GetRemoteCollectTable(), 0)
+	spinner := ui.NewSingleTableSpinner(r.uiApp, r.uiApp.GetRemoteCollectTable(), 0)
 	spinner.Start()
 
 	// Start consumer for remote collection updates
-	go r.handleRemoteCollectionUpdates(remoteUpdates, spinner, uiApp)
+	go r.handleRemoteCollectionUpdates(remoteUpdates, spinner, r.uiApp)
 
+	// Start the remote collection itself
 	go func() {
-		uiApp.SetRunning(true, "remote")
+		r.uiApp.SetRunning(true, "remote")
 
 		defer func() {
 			close(remoteUpdates)
 			spinner.Stop()
-			uiApp.SetAbortCallback(nil)
-			uiApp.SetRunning(false, "")
+			r.uiApp.SetAbortCallback(nil)
+			r.uiApp.SetRunning(false, "")
 		}()
 
 		processStartTime := time.Now()
-		r.bhInst.PerformRemoteCollection(r.auth)
+		r.bhInst.PerformRemoteCollection(auth, noCrossDomain)
 		processDuration := time.Since(processStartTime)
 
 		if r.bhInst.IsAborted() {
