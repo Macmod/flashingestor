@@ -5,22 +5,22 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
 	"github.com/Macmod/flashingestor/config"
-	"github.com/Macmod/flashingestor/msrpc"
 )
 
 // formatMethodTimes creates a colored string showing timing for each collection method
 func formatMethodTimes(methodTimes map[string]time.Duration) string {
-	// Define method order for consistent output
+	// Define method order matching actual execution order in remote_computers.go
 	methodOrder := []string{
-		"localgroups", "loggedon", "sessions",
-		"regsessions", "ntlmregistry", "userrights",
-		"webclient", "smbinfo", "dcregistry",
-		"ldapservices", "certservices", "caregistry",
+		"_rpc_winreg", "_rpc_lsat", "_rpc_samr", "_rpc_lsad", "_rpc_wkssvc", "_rpc_srvsvc",
+		"regsessions", "ntlmregistry", "dcregistry", "smbinfo",
+		"localgroups", "userrights", "loggedon", "sessions",
+		"webclient", "ldapservices", "certservices", "caregistry",
 	}
 
 	result := "{"
@@ -37,7 +37,7 @@ func formatMethodTimes(methodTimes map[string]time.Duration) string {
 		if duration >= time.Second {
 			color = "[red]"
 		}
-		result += "[blue]" + method + "[-]: " + color + duration.Round(time.Millisecond).String() + "[-]"
+		result += "[blue]" + method + "[-]: " + color + duration.String() + "[-]"
 		first = false
 	}
 	result += "}"
@@ -73,18 +73,17 @@ func isSidFiltered(sid string) bool {
 		strings.HasPrefix(sid, "S-1-5-96")
 }
 
-func getMachineSID(ctx context.Context, auth *config.CredentialMgr, computerName string, computerObjectId string) (string, error) {
+func getMachineSID(ctx context.Context, rpcMgr *RPCManager, computerObjectId string) (string, error) {
 	if machineSid, ok := builder.BState().MachineSIDCache.Get(computerObjectId); ok {
 		return machineSid.ObjectIdentifier, nil
 	}
 
-	rpcObj, err := msrpc.NewSamrRPC(ctx, computerName, auth)
+	rpcObj, err := rpcMgr.GetOrCreateSamrRPC(ctx)
 	if err != nil {
 		return "", err
 	}
-	defer rpcObj.Close()
 
-	machineSid, err := rpcObj.GetMachineSid(computerName)
+	machineSid, err := rpcObj.GetMachineSid(rpcMgr.GetTargetHost())
 	if err != nil {
 		return "", err
 	}
@@ -169,11 +168,9 @@ func requestNETBIOSNameFromComputer(ctx context.Context, ipAddress string, timeo
 }
 
 // resolveHostname resolves a hostname to a computer SID using RPC queries, NetBIOS and caches
-func resolveHostname(ctx context.Context, auth *config.CredentialMgr, host string, domain string) (string, bool) {
-	rpcObj, err := msrpc.NewWkssvcRPC(ctx, host, auth)
+func resolveHostname(ctx context.Context, rpcMgr *RPCManager, domain string) (string, bool) {
+	rpcObj, err := rpcMgr.GetOrCreateWkssvcRPC(ctx)
 	if err == nil {
-		defer rpcObj.Close()
-
 		wkstaInfo, err := rpcObj.GetWkstaInfo(ctx)
 		if err == nil {
 			if wkstaInfo.LANGroup != "" {
@@ -185,9 +182,198 @@ func resolveHostname(ctx context.Context, auth *config.CredentialMgr, host strin
 		}
 	}
 
+	host := rpcMgr.GetTargetHost()
 	if netbiosName, ok := requestNETBIOSNameFromComputer(ctx, host, config.NETBIOS_TIMEOUT); ok && netbiosName != "" {
 		host = netbiosName
 	}
 
 	return builder.ResolveHostnameInCaches(host, domain)
+}
+
+// isValidLocalGroupRid checks if a RID corresponds to a valid local group
+func isValidLocalGroupRid(rid int) bool {
+	switch LocalGroupRids(rid) {
+	case LocalGroupAdministrators, LocalGroupRemoteDesktopUsers, LocalGroupDcomUsers, LocalGroupPSRemote:
+		return true
+	default:
+		return false
+	}
+}
+
+// deduplicatePrincipals removes duplicate principals based on ObjectIdentifier
+func deduplicatePrincipals(principals []builder.TypedPrincipal) []builder.TypedPrincipal {
+	seen := make(map[string]bool)
+	result := []builder.TypedPrincipal{}
+
+	for _, p := range principals {
+		if !seen[p.ObjectIdentifier] {
+			seen[p.ObjectIdentifier] = true
+			result = append(result, p)
+		}
+	}
+
+	return result
+}
+
+// splitGPLinkProperty parses the gpLink attribute and returns individual links
+func splitGPLinkProperty(gpLink string) []GPLink {
+	// Format: [LDAP://cn={...},cn=policies,cn=system,DC=...;0][LDAP://...;2]
+	// Status: 0 = unenforced, 2 = enforced, 1 = disabled
+	var links []GPLink
+
+	// Split by ][  to get individual link blocks
+	gpLink = strings.TrimSpace(gpLink)
+	if gpLink == "" {
+		return links
+	}
+
+	// Remove outer brackets and split
+	blocks := strings.Split(gpLink, "][")
+
+	for _, block := range blocks {
+		// Clean up brackets
+		block = strings.Trim(block, "[]")
+		if block == "" {
+			continue
+		}
+
+		// Split by last semicolon to separate DN from status
+		lastSemicolon := strings.LastIndex(block, ";")
+		if lastSemicolon == -1 {
+			continue
+		}
+
+		ldapPath := block[:lastSemicolon]
+		status := block[lastSemicolon+1:]
+
+		// Extract DN from LDAP:// prefix
+		dn := strings.TrimPrefix(ldapPath, "LDAP://")
+		dn = strings.TrimPrefix(dn, "ldap://")
+
+		links = append(links, GPLink{
+			DN:     dn,
+			Status: status,
+		})
+	}
+
+	return links
+}
+
+// GPLink represents a single GPO link with its status
+type GPLink struct {
+	DN     string
+	Status string // "0" = unenforced, "2" = enforced, "1" = disabled
+}
+
+// removePrincipal removes a principal from the list by ObjectIdentifier
+func removePrincipal(principals []builder.TypedPrincipal, objectID string) []builder.TypedPrincipal {
+	result := []builder.TypedPrincipal{}
+	for _, p := range principals {
+		if p.ObjectIdentifier != objectID {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// removePrincipalsByType removes all principals of a specific type from the list
+func removePrincipalsByType(principals []builder.TypedPrincipal, objectType string) []builder.TypedPrincipal {
+	result := []builder.TypedPrincipal{}
+	for _, p := range principals {
+		if p.ObjectType != objectType {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// decodeUTF16 removes UTF-16 BOM and null bytes
+func decodeUTF16(s string) string {
+	// Remove UTF-16 LE BOM (FF FE)
+	s = strings.TrimPrefix(s, "\xFF\xFE")
+	// Remove UTF-16 BE BOM (FE FF)
+	s = strings.TrimPrefix(s, "\xFE\xFF")
+	// Remove null bytes (common in UTF-16 LE files)
+	s = strings.ReplaceAll(s, "\x00", "")
+	return s
+}
+
+// formatSuccessRate formats a success count/total as percentage string
+func formatSuccessRate(success, total int) string {
+	if total == 0 {
+		return "0/0"
+	}
+	percent := float64(success) / float64(total) * 100.0
+	return fmt.Sprintf("%d/%d (%.1f%%)", success, total, percent)
+}
+
+// checkPortOpen attempts to connect to a port
+type Dialer interface {
+	DialContext(context.Context, string, string) (net.Conn, error)
+}
+
+func checkPortOpen(ctx context.Context, dialer Dialer, host string, port int) (bool, error) {
+	address := net.JoinHostPort(host, strconv.Itoa(port))
+
+	conn, err := dialer.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close()
+
+	return true, nil
+}
+
+// parseDNComponents splits a DN into components, treating all DC= parts as a single domain component
+// Example: "OU=A,OU=B,DC=CORP,DC=LOCAL" -> ["OU=A,OU=B,DC=CORP,DC=LOCAL", "OU=B,DC=CORP,DC=LOCAL", "DC=CORP,DC=LOCAL"]
+func parseDNComponents(dn string) []string {
+	if dn == "" {
+		return nil
+	}
+
+	// Find the first DC= component (case-insensitive)
+	upperDN := strings.ToUpper(dn)
+	dcIndex := strings.Index(upperDN, ",DC=")
+	if dcIndex == -1 {
+		// No DC components, just return the DN itself
+		return []string{dn}
+	}
+
+	// Pre-allocate slice for components (estimate: depth of 5-8 is typical)
+	components := make([]string, 0, 8)
+
+	// Add full DN first
+	components = append(components, dn)
+
+	// Walk through and find each comma before the DC= part
+	// Use slicing to reference substrings without allocation
+	pos := 0
+	for pos < dcIndex {
+		commaIdx := strings.Index(dn[pos:dcIndex], ",")
+		if commaIdx == -1 {
+			break
+		}
+		pos += commaIdx + 1
+		// Slice from current position to end (includes domain part)
+		components = append(components, dn[pos:])
+	}
+
+	// Add domain component at the end (everything from dcIndex+1)
+	components = append(components, dn[dcIndex+1:])
+
+	return components
+}
+
+// getDomainFromComputerSID extracts the domain name from a computer SID using cached domain mappings
+func getDomainFromComputerSID(computerSID string) string {
+	// Extract domain SID by removing the RID (last component)
+	sidParts := strings.Split(computerSID, "-")
+	if len(sidParts) < 4 {
+		return ""
+	}
+	domainSID := strings.Join(sidParts[:len(sidParts)-1], "-")
+
+	// Look up domain name from domain SID
+	domain, _ := builder.BState().SIDDomainCache.Get(domainSID)
+	return domain
 }

@@ -1,11 +1,8 @@
 package bloodhound
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"net"
-	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -17,22 +14,30 @@ import (
 	"github.com/Macmod/flashingestor/core"
 	gildap "github.com/Macmod/flashingestor/ldap"
 	"github.com/Macmod/flashingestor/reader"
+	"github.com/Macmod/flashingestor/smb"
 	"github.com/go-ldap/ldap/v3"
-	"github.com/vmihailenco/msgpack"
 )
 
 // RemoteCollector executes remote data collection from AD computers and CAs.
 type RemoteCollector struct {
 	auth                *config.CredentialMgr
+	noCrossDomain       bool
 	RuntimeOptions      *config.RuntimeOptions
 	RemoteMethodTimeout time.Duration
 	logger              *core.Logger
 }
 
 // NewRemoteCollector creates a collector with the given credentials and options.
-func NewRemoteCollector(authenticator *config.CredentialMgr, runtimeOptions *config.RuntimeOptions, methodTimeout time.Duration, logger *core.Logger) *RemoteCollector {
+func NewRemoteCollector(
+	authenticator *config.CredentialMgr,
+	runtimeOptions *config.RuntimeOptions,
+	methodTimeout time.Duration,
+	noCrossDomain bool,
+	logger *core.Logger,
+) *RemoteCollector {
 	return &RemoteCollector{
 		auth:                authenticator,
+		noCrossDomain:       noCrossDomain,
 		RuntimeOptions:      runtimeOptions,
 		RemoteMethodTimeout: methodTimeout,
 		logger:              logger,
@@ -41,32 +46,34 @@ func NewRemoteCollector(authenticator *config.CredentialMgr, runtimeOptions *con
 
 type RemoteCollectionUpdate = core.RemoteCollectionUpdate
 
-const (
-	TotalRemoteSteps = 6
-)
-
-// formatSuccessRate formats a success count/total as percentage string
-func formatSuccessRate(success, total int) string {
-	if total == 0 {
-		return "0/0"
+// getTotalRemoteSteps returns the number of remote collection steps
+func (bh *BH) getTotalRemoteSteps() int {
+	baseSteps := 1 // Cache Load is always first
+	if bh.RuntimeOptions.IsMethodEnabled("gpolocalgroup") {
+		baseSteps++ // GPOLocalGroups
 	}
-	percent := float64(success) / float64(total) * 100.0
-	return fmt.Sprintf("%d/%d (%.1f%%)", success, total, percent)
+	if bh.RuntimeOptions.IsAnyCAMethodEnabled() {
+		baseSteps++ // RemoteEnterpriseCAs
+	}
+	if bh.RuntimeOptions.IsAnyComputerMethodEnabled() {
+		baseSteps += 3 // Load Computers, Status Checks, RemoteComputers
+	}
+	return baseSteps
 }
 
 // PerformRemoteCollection gathers data from computers and CAs using RPC and HTTP.
-func (bh *BH) PerformRemoteCollection(auth *config.CredentialMgr) {
+func (bh *BH) PerformRemoteCollection(auth *config.CredentialMgr, noCrossDomain bool) {
 	// Initialize builder state (clears old data)
 	forestMapPath := filepath.Join(bh.LdapFolder, "ForestDomains.json")
 	builder.BState().Init(forestMapPath)
 
 	// Create remote collector with authentication options
-	collector := NewRemoteCollector(auth, bh.RuntimeOptions, bh.RemoteMethodTimeout, bh.Logger)
+	collector := NewRemoteCollector(auth, bh.RuntimeOptions, bh.RemoteMethodTimeout, noCrossDomain, bh.Logger)
 
 	notifyAbort := func(currentStep int) bool {
 		if bh.IsAborted() {
 			// Mark remaining steps as skipped
-			for step := currentStep + 1; step <= TotalRemoteSteps; step++ {
+			for step := currentStep + 1; step <= bh.getTotalRemoteSteps(); step++ {
 				if bh.RemoteCollectionUpdates != nil {
 					bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
 						Step:   step,
@@ -79,54 +86,122 @@ func (bh *BH) PerformRemoteCollection(auth *config.CredentialMgr) {
 		return false
 	}
 
-	bh.runRemoteStep(1, func() { bh.loadRemoteCollectionCache(1) })
-	if notifyAbort(1) {
+	currentStep := 1
+	bh.runRemoteStep(currentStep, bh.loadRemoteCollectionCache)
+	if notifyAbort(currentStep) {
 		return
 	}
+	bh.Logger.Log0("-")
 
-	// Load computer targets from LDAP
-	var allComputers []CollectionTarget
-	bh.runRemoteStep(2, func() { allComputers = bh.loadComputerTargets(2) })
-	if notifyAbort(2) {
-		return
+	// GPO local group changes
+	if bh.RuntimeOptions.IsMethodEnabled("gpolocalgroup") {
+		currentStep++
+		targets := builder.BState().GetCachedGPLinks()
+
+		if len(targets) > 0 {
+			bh.Logger.Log0("🎯 About to perform GPOLocalGroup collection for %d targets (domains + OUs)", len(targets))
+		} else {
+			bh.Logger.Log0("🎯 [yellow]No targets found for GPOLocalGroup collection[-]")
+		}
+
+		bh.runRemoteStep(currentStep, func(row int) { bh.collectGPOChanges(row, targets, collector) })
+		if notifyAbort(currentStep) {
+			return
+		}
+
+		bh.Logger.Log0("-")
 	}
 
-	bh.log("✅ Found %d valid computers to collect data from", len(allComputers))
+	// Enterprise CAs
+	if bh.RuntimeOptions.IsAnyCAMethodEnabled() {
+		currentStep++
+		enterpriseCAs := bh.loadEnterpriseCATargets()
 
-	// Run availability checks
-	var availableComputers []CollectionTarget
-	bh.runRemoteStep(3, func() { availableComputers = bh.checkComputerAvailability(3, allComputers, collector) })
-	if notifyAbort(3) {
-		return
+		if len(enterpriseCAs) > 0 {
+			bh.Logger.Log0("🎯 About to perform active collection for %d enterprise CAs", len(enterpriseCAs))
+		} else {
+			bh.Logger.Log0("🎯 [yellow]No enterprise CAs found to collect[-]")
+		}
+
+		bh.runRemoteStep(currentStep, func(row int) { bh.collectRemoteEnterpriseCAs(row, enterpriseCAs, collector) })
+		if notifyAbort(currentStep) {
+			return
+		}
+
+		bh.Logger.Log0("-")
 	}
 
-	// Perform DNS lookups on available computers
-	var computers []CollectionTarget
-	bh.runRemoteStep(4, func() { computers = bh.performDNSLookups(4, availableComputers) })
-	if notifyAbort(4) {
-		return
+	// Computer collection
+	if bh.RuntimeOptions.IsAnyComputerMethodEnabled() {
+		// Load computer targets from LDAP
+		currentStep++
+		var allComputers []CollectionTarget
+		bh.runRemoteStep(currentStep, func(row int) { allComputers = bh.loadComputerTargets(row) })
+		if notifyAbort(currentStep) {
+			return
+		}
+
+		bh.Logger.Log0("✅ Found %d valid computers to collect data from", len(allComputers))
+
+		// Create writer manager for both availability checks and collection
+		writerManager := newDomainWriterManager(bh.ActiveFolder, "RemoteComputers.msgpack", bh.Logger)
+		defer writerManager.Close()
+
+		// Run availability checks
+		currentStep++
+		var availableComputers []CollectionTarget
+		var availabilityStats map[string]int
+		bh.runRemoteStep(currentStep, func(row int) {
+			availableComputers, availabilityStats = bh.checkComputerAvailability(row, allComputers, collector, writerManager)
+		})
+		if notifyAbort(currentStep) {
+			return
+		}
+
+		// Log availability check results with statistics
+		if len(availableComputers) == len(allComputers) {
+			bh.Logger.Log0("✅ [green]Availability checks passed for all %d computers[-]", len(allComputers))
+		} else if len(availableComputers) > 0 {
+			bh.Logger.Log0("✅ [green]Availability checks passed for %d/%d computers[-]", len(availableComputers), len(allComputers))
+			for reason, count := range availabilityStats {
+				bh.Logger.Log0("   [yellow]%d skipped: %s[-]", count, reason)
+			}
+		} else {
+			bh.Logger.Log0("🫠 [yellow]No computers passed availability checks[-]")
+			for reason, count := range availabilityStats {
+				bh.Logger.Log0("   [yellow]%d skipped: %s[-]", count, reason)
+			}
+		}
+
+		// Collect computer data
+		currentStep++
+
+		if len(availableComputers) > 0 {
+			bh.Logger.Log0("🎯 About to perform active collection for %d computers", len(availableComputers))
+		} else {
+			bh.Logger.Log0("🎯 [yellow]No computers found to collect[-]")
+		}
+
+		var processedCount, successCount int
+		bh.runRemoteStep(currentStep, func(row int) {
+			processedCount, successCount = bh.collectComputerData(row, availableComputers, collector, writerManager)
+		})
+
+		// Output final collection message
+		if successCount > 0 {
+			bh.Logger.Log0("✅ [green]Completed active collection for %d/%d computers (%d successful)[-]",
+				processedCount, len(availableComputers), successCount)
+		} else {
+			bh.Logger.Log0("🫠 [yellow]Completed active collection for %d/%d computers (none successful)[-]",
+				processedCount, len(availableComputers))
+		}
+
+		bh.Logger.Log0("-")
 	}
-
-	bh.log("✅ Successfully resolved %d/%d computers via DNS", len(computers), len(availableComputers))
-
-	// Collect from Enterprise CAs
-	enterpriseCAs := bh.loadEnterpriseCATargets()
-	if notifyAbort(4) {
-		return
-	}
-
-	bh.log("🎯 About to perform active collection for %d enterprise CAs", len(enterpriseCAs))
-	bh.runRemoteStep(5, func() { bh.CollectRemoteEnterpriseCA(5, enterpriseCAs, collector) })
-	if notifyAbort(5) {
-		return
-	}
-
-	bh.log("🎯 About to perform active collection for %d computers", len(computers))
-	bh.runRemoteStep(6, func() { bh.collectComputerData(6, computers, collector) })
 }
 
 // runRemoteStep runs a remote collection step and sends progress events
-func (bh *BH) runRemoteStep(row int, stepFunc func()) {
+func (bh *BH) runRemoteStep(row int, stepFunc func(int)) {
 	if bh.IsAborted() {
 		return
 	}
@@ -139,7 +214,7 @@ func (bh *BH) runRemoteStep(row int, stepFunc func()) {
 	}
 
 	startTime := time.Now()
-	stepFunc()
+	stepFunc(row)
 	elapsed := time.Since(startTime)
 
 	if bh.IsAborted() {
@@ -170,7 +245,7 @@ func (bh *BH) loadRemoteCollectionCache(step int) {
 	totalProcessed := 0
 	totalEntries := 0
 
-	neededCaches := []string{"domains", "trusts", "users", "groups", "computers", "configuration"}
+	neededCaches := []string{"domains", "ous", "trusts", "users", "groups", "computers", "gpos", "configuration"}
 
 	// First pass: open all readers and read their lengths
 	type readerInfo struct {
@@ -185,19 +260,19 @@ func (bh *BH) loadRemoteCollectionCache(step int) {
 		for _, filePath := range filePaths {
 			// Check if this cache has already been loaded
 			if builder.BState().IsCacheLoaded(filePath) {
-				bh.logVerbose("🦘 Skipped %s (already loaded)", filePath)
+				bh.Logger.Log1("🦘 Skipped %s (already loaded)", filePath)
 				continue
 			}
 
 			r, err := reader.NewMPReader(filePath)
 			if err != nil {
-				bh.log("❌ Error opening file %s: %v", filePath, err)
+				bh.Logger.Log0("❌ Error opening file %s: %v", filePath, err)
 				continue
 			}
 
 			numEntries, err := r.ReadLength()
 			if err != nil {
-				bh.log("❌ Error reading length of %s: %v", filePath, err)
+				bh.Logger.Log0("❌ Error reading length of %s: %v", filePath, err)
 				r.Close()
 				continue
 			}
@@ -254,14 +329,15 @@ func (bh *BH) loadRemoteCollectionCache(step int) {
 		}
 
 		filePath := info.reader.GetPath()
-		bh.logVerbose("📦 Loading %s", filePath)
+		bh.Logger.Log1("📦 Loading %s", filePath)
 
+		// TODO: Only store entries for GPO collection if the method is enabled
 		builder.BState().CacheEntries(info.reader, info.identifier, bh.Logger, bh.IsAborted, progressCallback)
 
 		// Mark this cache as loaded
 		builder.BState().MarkCacheLoaded(filePath)
 
-		bh.logVerbose("✅ %s loaded", filePath)
+		bh.Logger.Log1("✅ %s loaded", filePath)
 	}
 }
 
@@ -276,14 +352,14 @@ func (bh *BH) loadEnterpriseCATargets() []EnterpriseCACollectionTarget {
 	for _, configPath := range configPaths {
 		mpReader, err := reader.NewMPReader(configPath)
 		if err != nil {
-			bh.log("❌ Error opening configuration file: %v", err)
+			bh.Logger.Log0("❌ Error opening configuration file: %v", err)
 			continue
 		}
 		defer mpReader.Close()
 
 		_, err = mpReader.ReadLength()
 		if err != nil {
-			bh.log("❌ Error reading length of configuration file: %v", err)
+			bh.Logger.Log0("❌ Error reading length of configuration file: %v", err)
 			continue
 		}
 
@@ -297,7 +373,7 @@ func (bh *BH) loadEnterpriseCATargets() []EnterpriseCACollectionTarget {
 
 			*originalEntry = ldap.Entry{}
 			if err := mpReader.ReadEntry(originalEntry); err != nil {
-				bh.log("❌ Error decoding configuration entry: %v", err)
+				bh.Logger.Log0("❌ Error decoding configuration entry: %v", err)
 				continue
 			}
 
@@ -308,10 +384,12 @@ func (bh *BH) loadEnterpriseCATargets() []EnterpriseCACollectionTarget {
 				caName := entry.GetAttrVal("name", "")
 				dNSHostName := entry.GetAttrVal("dNSHostName", "")
 				domain := entry.GetDomainFromDN()
+				guid := entry.GetGUID()
 
-				if caName != "" && dNSHostName != "" && domain != "" {
+				if caName != "" && dNSHostName != "" && domain != "" && guid != "" {
 					targets = append(targets, EnterpriseCACollectionTarget{
-						GUID:        entry.GetGUID(),
+						GUID:        guid,
+						DN:          entry.DN,
 						DNSHostName: dNSHostName,
 						CAName:      caName,
 						Domain:      domain,
@@ -324,47 +402,21 @@ func (bh *BH) loadEnterpriseCATargets() []EnterpriseCACollectionTarget {
 	return targets
 }
 
-// CollectRemoteEnterpriseCA sets up encoding and delegates to collectEnterpriseCAData
-func (bh *BH) CollectRemoteEnterpriseCA(step int, targets []EnterpriseCACollectionTarget, collector *RemoteCollector) {
+// collectRemoteEnterpriseCA sets up encoding and delegates to collectEnterpriseCAData
+func (bh *BH) collectRemoteEnterpriseCAs(step int, targets []EnterpriseCACollectionTarget, collector *RemoteCollector) {
 	if len(targets) == 0 {
 		return
 	}
 
-	// Create output file with buffered writer
-	remoteCAFile := filepath.Join(bh.ActiveFolder, "RemoteEnterpriseCA.msgpack")
-	outFile, err := os.Create(remoteCAFile)
-	if err != nil {
-		bh.log("❌ Failed to create CA results file: %v", err)
-		return
-	}
-	defer outFile.Close()
+	writerManager := newDomainWriterManager(bh.ActiveFolder, "RemoteEnterpriseCA.msgpack", bh.Logger)
+	defer writerManager.Close()
 
-	// Use buffered writer for better encoding performance
-	bufWriter := bufio.NewWriterSize(outFile, 1024*1024)
-	defer bufWriter.Flush()
-
-	encoder := msgpack.NewEncoder(bufWriter)
-
-	bh.collectEnterpriseCAData(step, targets, collector, encoder)
+	bh.collectEnterpriseCAData(step, targets, collector, writerManager)
 }
 
 // collectEnterpriseCAData collects data from enterprise CAs using worker pool
-func (bh *BH) collectEnterpriseCAData(step int, targets []EnterpriseCACollectionTarget, collector *RemoteCollector, encoder *msgpack.Encoder) {
-	// Prepare targets - resolve IPs upfront
-	for idx := range targets {
-		ip := net.ParseIP(targets[idx].DNSHostName)
-		if ip != nil {
-			targets[idx].IPAddress = targets[idx].DNSHostName
-		} else {
-			ctx, cancel := context.WithTimeout(context.Background(), config.DNS_LOOKUP_TIMEOUT)
-			addrs, err := bh.Resolver.LookupHost(ctx, targets[idx].DNSHostName)
-			cancel()
-			if err == nil && len(addrs) > 0 {
-				targets[idx].IPAddress = addrs[0]
-			}
-		}
-	}
-
+func (bh *BH) collectEnterpriseCAData(step int, targets []EnterpriseCACollectionTarget, collector *RemoteCollector,
+	writerManager *domainWriterManager) {
 	numWorkers := bh.RemoteWorkers
 	timeout := bh.RemoteComputerTimeout
 
@@ -384,14 +436,16 @@ func (bh *BH) collectEnterpriseCAData(step int, targets []EnterpriseCACollection
 					return
 				}
 
-				if target.IPAddress == "" {
-					continue
+				startTime := time.Now()
+				collectionCtx, collectionCancel := context.WithTimeout(context.Background(), timeout)
+				result, ok := collector.CollectRemoteEnterpriseCAWithContext(collectionCtx, target)
+				collectionCancel()
+				if !ok {
+					bh.Logger.Log1("📋 [red][%s[] EnterpriseCA timeout after %v[-]", target.DNSHostName, time.Since(startTime).Round(time.Millisecond))
 				}
 
-				collectionCtx, collectionCancel := context.WithTimeout(context.Background(), timeout)
-				result := collector.CollectRemoteEnterpriseCAWithContext(collectionCtx, target)
-				collectionCancel()
-
+				// Always send results (complete or partial)
+				// The processEnterpriseCAResults will filter empty results
 				resultChan <- result
 			}
 		}(i)
@@ -402,7 +456,7 @@ func (bh *BH) collectEnterpriseCAData(step int, targets []EnterpriseCACollection
 	var processedCount int
 	var successCount int
 
-	go bh.processEnterpriseCAResults(step, resultChan, workersDone, encoder, targets, &processedCount, &successCount)
+	go bh.processEnterpriseCAResults(step, resultChan, workersDone, writerManager, targets, &processedCount, &successCount)
 
 	// Feed targets to workers
 	go func() {
@@ -421,6 +475,12 @@ func (bh *BH) collectEnterpriseCAData(step int, targets []EnterpriseCACollection
 
 	// Wait for result processor
 	<-workersDone
+
+	if successCount > 0 {
+		bh.Logger.Log0("✅ [green]Completed data collection for %d/%d enterprise CAs (%d successful)[-]", processedCount, len(targets), successCount)
+	} else {
+		bh.Logger.Log0("🫠 [yellow]Completed data collection for %d/%d enterprise CAs (none successful)[-]", processedCount, len(targets))
+	}
 }
 
 // processEnterpriseCAResults processes CA collection results from workers
@@ -428,7 +488,7 @@ func (bh *BH) processEnterpriseCAResults(
 	step int,
 	resultChan chan EnterpriseCARemoteCollectionResult,
 	workersDone chan struct{},
-	encoder *msgpack.Encoder,
+	writerManager *domainWriterManager,
 	targets []EnterpriseCACollectionTarget,
 	processedCount *int,
 	successCount *int,
@@ -443,22 +503,39 @@ func (bh *BH) processEnterpriseCAResults(
 	seenGUIDs := make(map[string]bool)
 
 	for res := range resultChan {
-		// Encode result only if not seen before,
+		*processedCount++
+
+		// Encode result only if not seen before AND has successful data,
 		// but report progress given the entire set
 		// Repeated identifiers are not likely to happen outside of testing,
 		// but we handle it just to be safe.
 		if !seenGUIDs[res.GUID] {
 			seenGUIDs[res.GUID] = true
-			if err := encoder.Encode(res); err != nil {
-				bh.log("Failed to encode CA result: %v", err)
+
+			// Count successes
+			hasSuccess := bh.checkAnyCASuccess(res)
+			if hasSuccess {
+				*successCount++
 			}
-		}
 
-		*processedCount++
-
-		// Count successes
-		if bh.checkAnyCASuccess(res) {
-			*successCount++
+			// Only write if we have actual data
+			if hasSuccess {
+				// Get domain from DN
+				domain := gildap.DistinguishedNameToDomain(res.DN)
+				if domain == "" {
+					bh.Logger.Log0("🫠 [yellow]Could not determine domain from DN '%s' for GUID %s, skipping[-]", res.DN, res.GUID)
+				} else {
+					// Get domain-specific writer
+					writer, err := writerManager.Get(domain)
+					if err != nil {
+						bh.Logger.Log0("❌ Failed to get writer for domain %s: %v", domain, err)
+					} else {
+						if err := writer.encoder.Encode(res); err != nil {
+							bh.Logger.Log0("Failed to encode CA result: %v", err)
+						}
+					}
+				}
+			}
 		}
 
 		elapsed := time.Since(startTime)
@@ -505,14 +582,14 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 	for _, computerPath := range computerPaths {
 		mpReader, err := reader.NewMPReader(computerPath)
 		if err != nil {
-			bh.log("❌ Error opening computers file: %v", err)
+			bh.Logger.Log0("❌ Error opening computers file: %v", err)
 			continue
 		}
 		defer mpReader.Close()
 
 		length, err := mpReader.ReadLength()
 		if err != nil {
-			bh.log("❌ Error reading length of computers file: %v", err)
+			bh.Logger.Log0("❌ Error reading length of computers file: %v", err)
 			continue
 		}
 
@@ -536,7 +613,7 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 
 			*originalEntry = ldap.Entry{}
 			if err := reader.ReadEntry(originalEntry); err != nil {
-				bh.log("❌ Error decoding computer: %v", err)
+				bh.Logger.Log0("❌ Error decoding computer: %v", err)
 				continue
 			}
 
@@ -545,11 +622,12 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 
 			dNSHostName := entry.GetAttrVal("dNSHostName", "")
 			sAMAccountName := entry.GetAttrVal("sAMAccountName", "")
+			sid := entry.GetSID()
 
-			if dNSHostName != "" && sAMAccountName != "" {
+			if dNSHostName != "" && sAMAccountName != "" && sid != "" {
 				validCount.Add(1)
 				targets = append(targets, CollectionTarget{
-					SID:                entry.GetSID(),
+					SID:                sid,
 					DNSHostName:        dNSHostName,
 					SamName:            sAMAccountName,
 					IsDC:               entry.IsDC(),
@@ -629,12 +707,17 @@ func (bh *BH) loadComputerTargets(step int) []CollectionTarget {
 }
 
 // checkComputerAvailability runs availability checks on computers
-func (bh *BH) checkComputerAvailability(step int, computers []CollectionTarget, collector *RemoteCollector) []CollectionTarget {
+// Returns available computers and a map of error reasons to counts
+// Writes unavailable computers to writerManager with Status.Error filled
+func (bh *BH) checkComputerAvailability(step int, computers []CollectionTarget, collector *RemoteCollector,
+	writerManager *domainWriterManager) ([]CollectionTarget, map[string]int) {
 	enabledChecks := bh.RuntimeOptions.GetAvailabilityChecks()
+	failureStats := make(map[string]int)
+	var statsMu sync.Mutex
 
 	// If empty map, skip all checks - return all computers
 	if len(enabledChecks) == 0 {
-		bh.log("🦘 Skipping availability checks (empty list in config)")
+		bh.Logger.Log0("🦘 Skipping availability checks (empty list in config)")
 
 		// Mark step as skipped
 		if bh.RemoteCollectionUpdates != nil {
@@ -648,7 +731,7 @@ func (bh *BH) checkComputerAvailability(step int, computers []CollectionTarget, 
 			}
 		}
 
-		return computers
+		return computers, failureStats
 	}
 
 	totalComputers := len(computers)
@@ -664,6 +747,7 @@ func (bh *BH) checkComputerAvailability(step int, computers []CollectionTarget, 
 	// These are cheap checks (OS version, last logon time, etc.)
 	// that filter out obviously unavailable computers
 	var afterInstantChecks []CollectionTarget
+
 	for _, computer := range computers {
 		ok, errMsg := checkInstantAvailability(
 			computer.OperatingSystem,
@@ -675,7 +759,28 @@ func (bh *BH) checkComputerAvailability(step int, computers []CollectionTarget, 
 		if ok {
 			afterInstantChecks = append(afterInstantChecks, computer)
 		} else {
-			bh.logVerbose("🦘 [yellow]Skipping %s: %s[-]", computer.DNSHostName, errMsg)
+			bh.Logger.Log1("🦘 [yellow][%s[] Skipped Computer: %s[-]", computer.DNSHostName, errMsg)
+
+			// Track failure reason
+			failureStats[errMsg]++
+
+			// Write unavailable computer with error status
+			errStatus := builder.ComputerStatus{
+				Connectable: false,
+				Error:       errMsg,
+			}
+			result := RemoteCollectionResult{
+				SID:    computer.SID,
+				Status: &errStatus,
+			}
+
+			domain := getDomainFromComputerSID(computer.SID)
+			if domain != "" {
+				writer, err := writerManager.Get(domain)
+				if err == nil {
+					writer.encoder.Encode(result)
+				}
+			}
 		}
 	}
 
@@ -704,8 +809,7 @@ func (bh *BH) checkComputerAvailability(step int, computers []CollectionTarget, 
 			}
 		}
 
-		bh.log("✅ Availability checks passed for %d/%d computers", len(afterInstantChecks), totalComputers)
-		return afterInstantChecks
+		return afterInstantChecks, failureStats
 	}
 
 	// Step 2: Run port scans concurrently with worker pool
@@ -741,7 +845,30 @@ func (bh *BH) checkComputerAvailability(step int, computers []CollectionTarget, 
 					availableCount.Add(1) // Computer passed both instant checks AND port scan
 					results <- job
 				} else {
-					bh.logVerbose("🦘 [yellow]Skipping %s: %s[-]", job.DNSHostName, errMsg)
+					bh.Logger.Log1("🦘 [yellow][%s[] Skipped Computer: %s[-]", job.DNSHostName, errMsg)
+
+					// Track failure reason
+					statsMu.Lock()
+					failureStats[errMsg]++
+					statsMu.Unlock()
+
+					// Write unavailable computer with error status
+					errStatus := builder.ComputerStatus{
+						Connectable: false,
+						Error:       errMsg,
+					}
+					result := RemoteCollectionResult{
+						SID:    job.SID,
+						Status: &errStatus,
+					}
+
+					domain := getDomainFromComputerSID(job.SID)
+					if domain != "" {
+						writer, err := writerManager.Get(domain)
+						if err == nil {
+							writer.encoder.Encode(result)
+						}
+					}
 				}
 
 				// Send progress update
@@ -832,157 +959,15 @@ func (bh *BH) checkComputerAvailability(step int, computers []CollectionTarget, 
 		}
 	}
 
-	bh.log("✅ Availability checks passed for %d/%d computers", len(available), totalComputers)
-	return available
-}
-
-// performDNSLookups performs DNS lookups on computers and returns those with valid IPs
-func (bh *BH) performDNSLookups(step int, computers []CollectionTarget) []CollectionTarget {
-	var targets []CollectionTarget
-	totalComputers := len(computers)
-
-	startTime := time.Now()
-	processedCount := atomic.Int32{}
-	successCount := atomic.Int32{}
-
-	// Create channels for job distribution
-	jobs := make(chan CollectionTarget, bh.DNSWorkers*2)
-	results := make(chan CollectionTarget, bh.DNSWorkers*2)
-
-	// Start DNS worker pool
-	var wg sync.WaitGroup
-	for w := 0; w < bh.DNSWorkers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for job := range jobs {
-				if bh.IsAborted() {
-					continue
-				}
-
-				ctx, cancel := context.WithTimeout(context.Background(), config.DNS_LOOKUP_TIMEOUT)
-				addrs, err := bh.Resolver.LookupHost(ctx, job.DNSHostName)
-				cancel()
-
-				processedCount.Add(1)
-
-				if err == nil && len(addrs) > 0 {
-					successCount.Add(1)
-					// Update with IP address
-					job.IPAddress = addrs[0]
-					results <- job
-				} else {
-					bh.logVerbose("🫠 [yellow]Could not resolve %s: %v[-]", job.DNSHostName, err)
-				}
-
-				// Send progress update
-				if bh.RemoteCollectionUpdates != nil {
-					currentProcessed := int(processedCount.Load())
-					currentSuccess := int(successCount.Load())
-					elapsed := time.Since(startTime)
-
-					var percent float64
-					if totalComputers > 0 {
-						percent = float64(currentProcessed) / float64(totalComputers) * 100.0
-					}
-
-					successText := formatSuccessRate(currentSuccess, currentProcessed)
-
-					select {
-					case bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
-						Step:      step,
-						Processed: currentProcessed,
-						Total:     totalComputers,
-						Percent:   percent,
-						Success:   successText,
-						Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
-					}:
-					default:
-					}
-				}
-			}
-		}()
-	}
-
-	// Start result collector
-	done := make(chan struct{})
-	var targetsMu sync.Mutex
-	go func() {
-		for result := range results {
-			targetsMu.Lock()
-			targets = append(targets, result)
-			targetsMu.Unlock()
-		}
-		close(done)
-	}()
-
-	// Feed jobs to workers
-	for _, computer := range computers {
-		if bh.IsAborted() {
-			break
-		}
-		jobs <- computer
-	}
-
-	close(jobs)
-	wg.Wait()
-	close(results)
-	<-done
-
-	// Send final update
-	if bh.RemoteCollectionUpdates != nil {
-		finalProcessed := int(processedCount.Load())
-		finalSuccess := int(successCount.Load())
-		elapsed := time.Since(startTime)
-		var percent float64
-		if totalComputers > 0 {
-			percent = float64(finalProcessed) / float64(totalComputers) * 100.0
-		}
-
-		successText := formatSuccessRate(finalSuccess, finalProcessed)
-
-		// Calculate average speed
-		var avgSpeedText string
-		if elapsed.Seconds() > 0 {
-			avgRate := float64(finalProcessed) / elapsed.Seconds()
-			avgSpeedText = fmt.Sprintf("%.0f/s", avgRate)
-		} else {
-			avgSpeedText = "-"
-		}
-
-		bh.RemoteCollectionUpdates <- RemoteCollectionUpdate{
-			Step:      step,
-			Processed: finalProcessed,
-			Total:     totalComputers,
-			Percent:   percent,
-			Success:   successText,
-			AvgSpeed:  avgSpeedText,
-			Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
-		}
-	}
-
-	return targets
+	return available, failureStats
 }
 
 // collectComputerData collects data from computers using worker pool
-func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collector *RemoteCollector) {
+// Returns (processedCount, successCount)
+func (bh *BH) collectComputerData(step int, computers []CollectionTarget,
+	collector *RemoteCollector, writerManager *domainWriterManager) (int, int) {
 	numWorkers := bh.RemoteWorkers
 	timeout := bh.RemoteComputerTimeout
-
-	// Create output file
-	remoteResultsFile := filepath.Join(bh.ActiveFolder, "RemoteComputers.msgpack")
-	outFile, err := os.Create(remoteResultsFile)
-	if err != nil {
-		bh.log("❌ Failed to create results file: %v", err)
-		return
-	}
-	defer outFile.Close()
-
-	// Use buffered writer for better encoding performance
-	bufWriter := bufio.NewWriterSize(outFile, 1024*1024) // 1MB buffer
-	defer bufWriter.Flush()
-
-	encoder := msgpack.NewEncoder(bufWriter)
 
 	// Setup worker pool
 	targetChan := make(chan CollectionTarget)
@@ -1001,10 +986,19 @@ func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collec
 					return
 				}
 
+				startTime := time.Now()
 				collectionCtx, collectionCancel := context.WithTimeout(context.Background(), timeout)
-				result := collector.CollectRemoteComputerWithContext(collectionCtx, target)
+				result, ok := collector.CollectRemoteComputerWithContext(collectionCtx, target)
 				collectionCancel()
+				if !ok {
+					attempted := result.CountAttemptedMethods()
+					total := result.GetTotalMethods(collector.RuntimeOptions, target.IsDC)
+					bh.Logger.Log1("💻 [red][%s[] Computer timeout after %v (%d/%d methods ran)[-]",
+						target.DNSHostName, time.Since(startTime).Round(time.Millisecond), attempted, total)
+				}
 
+				// Always send results (complete or partial)
+				// The processComputerResults filter will discard empty results
 				resultChan <- result
 			}
 		}(i)
@@ -1015,7 +1009,7 @@ func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collec
 	var processedCount int
 	var successCount int
 
-	go bh.processComputerResults(step, resultChan, workersDone, encoder, computers, &processedCount, &successCount)
+	go bh.processComputerResults(step, resultChan, workersDone, writerManager, computers, &processedCount, &successCount)
 
 	// Feed targets to workers
 	go func() {
@@ -1037,21 +1031,7 @@ func (bh *BH) collectComputerData(step int, computers []CollectionTarget, collec
 	// Wait for result processor
 	<-workersDone
 
-	// Check if aborted before finalizing
-	if bh.IsAborted() {
-		if fileInfo, err := os.Stat(remoteResultsFile); err == nil {
-			bh.log("✅ Computer results saved to: %s (%s)", remoteResultsFile, formatFileSize(fileInfo.Size()))
-		} else {
-			bh.log("🫠 [yellow]Problem saving %s: %v[-]", remoteResultsFile, err)
-		}
-		return
-	}
-
-	if fileInfo, err := os.Stat(remoteResultsFile); err == nil {
-		bh.log("✅ Computer results saved to: %s (%s)", remoteResultsFile, formatFileSize(fileInfo.Size()))
-	} else {
-		bh.log("🫠 [yellow]Problem saving %s: %v[-]", remoteResultsFile, err)
-	}
+	return processedCount, successCount
 }
 
 func (bh *BH) checkAnyComputerSuccess(result RemoteCollectionResult) bool {
@@ -1076,6 +1056,14 @@ func (bh *BH) checkAnyComputerSuccess(result RemoteCollectionResult) bool {
 		return true
 	}
 	if result.IsWebClientRunning.Collected {
+		return true
+	}
+	if result.SMBInfo != nil && result.SMBInfo.Collected {
+		return true
+	}
+	if result.LdapServices.HasLdap || result.LdapServices.HasLdaps ||
+		result.LdapServices.IsChannelBindingRequired.Collected ||
+		result.LdapServices.IsSigningRequired.Collected {
 		return true
 	}
 
@@ -1105,8 +1093,8 @@ func (bh *BH) checkAnyCASuccess(result EnterpriseCARemoteCollectionResult) bool 
 }
 
 // processComputerResults handles result processing from collection workers
-func (bh *BH) processComputerResults(step int, resultChan chan RemoteCollectionResult, done chan struct{}, encoder *msgpack.Encoder,
-	computers []CollectionTarget, processedCount, successCount *int) {
+func (bh *BH) processComputerResults(step int, resultChan chan RemoteCollectionResult, done chan struct{},
+	writerManager *domainWriterManager, computers []CollectionTarget, processedCount, successCount *int) {
 
 	defer close(done)
 	startTime := time.Now()
@@ -1117,19 +1105,33 @@ func (bh *BH) processComputerResults(step int, resultChan chan RemoteCollectionR
 	seenSIDs := make(map[string]bool)
 
 	for res := range resultChan {
-		// Encode result only if not seen before
-		if !seenSIDs[res.SID] {
-			seenSIDs[res.SID] = true
-			if err := encoder.Encode(res); err != nil {
-				bh.log("Failed to encode result: %v", err)
-			}
-		}
-
 		*processedCount++
 
-		// Count successes
-		if bh.checkAnyComputerSuccess(res) {
-			*successCount++
+		// Encode result only if not seen before AND has successful data
+		success := bh.checkAnyComputerSuccess(res)
+		if !seenSIDs[res.SID] {
+			seenSIDs[res.SID] = true
+
+			// Only write if we have actual data
+			if success {
+				*successCount++
+
+				// Get domain for this SID
+				domain := getDomainFromComputerSID(res.SID)
+				if domain == "" {
+					bh.Logger.Log0("🫠 [yellow]Could not determine domain for SID %s, skipping[-]", res.SID)
+				} else {
+					// Get domain-specific writer
+					writer, err := writerManager.Get(domain)
+					if err != nil {
+						bh.Logger.Log0("❌ Failed to get writer for domain %s: %v", domain, err)
+					} else {
+						if err := writer.encoder.Encode(res); err != nil {
+							bh.Logger.Log0("Failed to encode result: %v", err)
+						}
+					}
+				}
+			}
 		}
 
 		// Progress reporting
@@ -1162,4 +1164,184 @@ func (bh *BH) processComputerResults(step int, resultChan chan RemoteCollectionR
 			}
 		}
 	}
+}
+
+// collectGPOChanges collects GPO local group changes for all OUs and Domains
+// This reads from the existing LDAP ingestion (no LDAP queries)
+func (bh *BH) collectGPOChanges(step int, targets map[string]builder.GPLinkEntry, collector *RemoteCollector) {
+	// Clear the GPO action cache for this collection run
+	gpoActionCacheMu.Lock()
+	gpoActionCache = make(map[string][]GroupAction)
+	gpoActionCacheMu.Unlock()
+
+	writerManager := newDomainWriterManager(bh.ActiveFolder, "RemoteGPOChanges.msgpack", bh.Logger)
+	defer writerManager.Close()
+
+	startTime := time.Now()
+
+	// Create shared SMB reader for all workers
+	smbReader := smb.NewFileReader(collector.auth)
+	defer smbReader.Close() // Close all pooled connections when done
+
+	// Process with worker pool
+	totalTargets := len(targets)
+	numWorkers := bh.RemoteWorkers
+	resultChan := make(chan GPOLocalGroupsCollectionResult, bh.RemoteWriteBuff)
+	taskChan := make(chan struct {
+		DN string
+		builder.GPLinkEntry
+	}, totalTargets)
+
+	var wg sync.WaitGroup
+	var processedCount atomic.Int32
+	var successCount atomic.Int32
+	var targetsWithChanges atomic.Int32
+
+	// Start workers
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			for task := range taskChan {
+				if bh.IsAborted() {
+					return
+				}
+
+				gpoChanges, err := collector.ReadGPOLocalGroupsForTarget(task.DN, task.GPLink, smbReader)
+
+				processedCount.Add(1)
+				if err == nil {
+					successCount.Add(1)
+				} else {
+					bh.Logger.Log1("❌ [red][%s[] GPOLocalGroups: %v[-]", task.DN, err)
+				}
+
+				hasChanges := !gpoChanges.IsEmpty()
+
+				if hasChanges {
+					targetsWithChanges.Add(1)
+					bh.Logger.Log1("🎡 [green][%s[] Found GPOLocalGroup changes: %d admins, %d RDP, %d DCOM, %d PSRemote[-]",
+						task.DN,
+						len(gpoChanges.LocalAdmins),
+						len(gpoChanges.RemoteDesktopUsers),
+						len(gpoChanges.DcomUsers),
+						len(gpoChanges.PSRemoteUsers))
+				} else {
+					bh.Logger.Log2("🎡 [%s[] No GPOLocalGroup changes found", task.DN)
+				}
+
+				// Send result to channel
+				resultChan <- GPOLocalGroupsCollectionResult{
+					DN:         task.DN,
+					ObjectType: task.ObjectType,
+					GPOChanges: *gpoChanges,
+				}
+			}
+		}()
+	}
+
+	// Start result writer with progress tracking
+	var writerWg sync.WaitGroup
+	writerWg.Add(1)
+	go func() {
+		defer writerWg.Done()
+		lastUpdateTime := startTime
+		lastCount := 0
+		processedInWriter := 0
+
+		for result := range resultChan {
+			if bh.IsAborted() {
+				return
+			}
+
+			processedInWriter++
+
+			// Only write if there are actual changes
+			if !result.GPOChanges.IsEmpty() {
+				// Extract domain from DN
+				domain := gildap.DistinguishedNameToDomain(result.DN)
+				if domain == "" {
+					bh.Logger.Log0("🫠 [yellow]Could not extract domain from DN: %s, skipping entry[-]", result.DN)
+				} else {
+					// Get or create encoder for this domain
+					writer, err := writerManager.Get(domain)
+					if err != nil {
+						bh.Logger.Log0("❌ Error getting writer for domain %s: %v", domain, err)
+					} else {
+						if err := writer.encoder.Encode(&result); err != nil {
+							bh.Logger.Log0("❌ Error encoding GPO changes entry: %v", err)
+						}
+					}
+				}
+			}
+
+			// Send progress update
+			processed := int(processedCount.Load())
+			success := int(successCount.Load())
+			elapsed := time.Since(startTime)
+			var percent float64
+			if totalTargets > 0 {
+				percent = float64(processed) / float64(totalTargets) * 100.0
+			}
+
+			metrics := calculateProgressMetrics(processed, totalTargets, startTime, &lastUpdateTime, &lastCount)
+
+			if bh.RemoteCollectionUpdates != nil {
+				update := RemoteCollectionUpdate{
+					Step:      step,
+					Processed: processed,
+					Total:     totalTargets,
+					Percent:   percent,
+					Speed:     metrics.speedText,
+					AvgSpeed:  metrics.avgSpeedText,
+					Success:   formatSuccessRate(success, processed),
+					ETA:       metrics.etaText,
+					Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+				}
+
+				bh.RemoteCollectionUpdates <- update
+			}
+		}
+	}()
+
+	// Feed tasks
+	go func() {
+		for dn, target := range targets {
+			if bh.IsAborted() {
+				break
+			}
+			// Create a task with DN from the map key
+			taskChan <- struct {
+				DN string
+				builder.GPLinkEntry
+			}{
+				DN:          dn,
+				GPLinkEntry: target,
+			}
+		}
+		close(taskChan)
+	}()
+
+	// Wait for workers to finish
+	wg.Wait()
+	close(resultChan)
+
+	// Wait for writer to finish
+	writerWg.Wait()
+
+	finalMessageStr := "✅ [green]Completed GPOLocalGroup collection for %d/%d targets"
+	numChanges := targetsWithChanges.Load()
+	if numChanges > 0 {
+		if numChanges == 1 {
+			finalMessageStr += " (1 target with changes)"
+		} else {
+			finalMessageStr += fmt.Sprintf(" (%d targets with changes)", numChanges)
+		}
+	} else {
+		finalMessageStr += " (none had changes)"
+	}
+	finalMessageStr += "[-]"
+
+	bh.Logger.Log0(finalMessageStr, successCount.Load(), totalTargets)
 }

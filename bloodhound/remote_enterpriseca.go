@@ -2,49 +2,51 @@ package bloodhound
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
-	"github.com/Macmod/flashingestor/msrpc"
 )
 
 // EnterpriseCARemoteCollectionResult holds data collected remotely from a CA.
 type EnterpriseCARemoteCollectionResult struct {
-	GUID                    string                                  `json:"GUID"`
-	CARegistryData          builder.CARegistryData                  `json:"CARegistryData"`
-	HttpEnrollmentEndpoints []builder.CAEnrollmentEndpointAPIResult `json:"HttpEnrollmentEndpoints"`
-	HostingComputer         string                                  `json:"HostingComputer"`
+	GUID                    string
+	DN                      string
+	CARegistryData          builder.CARegistryData
+	HttpEnrollmentEndpoints []builder.CAEnrollmentEndpointAPIResult
+	HostingComputer         string
 }
 
 // EnterpriseCACollectionTarget identifies a CA for remote data collection.
 type EnterpriseCACollectionTarget struct {
 	GUID        string
+	DN          string
 	DNSHostName string
 	CAName      string
 	Domain      string
-	IPAddress   string
 }
 
-func (rc *RemoteCollector) collectEnterpriseCARegistryData(ctx context.Context, caName string, targetHostname string, objectSid string, targetDomain string) builder.CARegistryData {
-	result := builder.CARegistryData{}
-
-	msrpcObj, err := msrpc.NewWinregRPC(ctx, targetHostname, rc.auth)
+func (rc *RemoteCollector) collectEnterpriseCARegistryData(ctx context.Context, caName string, objectSid string, targetDomain string, rpcMgr *RPCManager) builder.CARegistryData {
+	msrpcObj, err := rpcMgr.GetOrCreateWinregRPC(ctx)
 	if err != nil {
-		return result
+		errStr := err.Error()
+		return builder.CARegistryData{
+			CASecurity:                  builder.AceRegistryAPIResult{APIResult: builder.APIResult{FailureReason: &errStr}},
+			EnrollmentAgentRestrictions: builder.EnrollmentAgentRegistryAPIResult{APIResult: builder.APIResult{FailureReason: &errStr}},
+			IsUserSpecifiesSanEnabled:   builder.BoolRegistryAPIResult{APIResult: builder.APIResult{FailureReason: &errStr}},
+			IsRoleSeparationEnabled:     builder.BoolRegistryAPIResult{APIResult: builder.APIResult{FailureReason: &errStr}},
+		}
 	}
-	defer msrpcObj.Close()
 
-	certAbuse := NewCertAbuseProcessor(targetDomain, msrpcObj, rc.auth)
-	if certAbuse == nil {
-		return result
+	certAbuse := NewCertAbuseProcessor(targetDomain, msrpcObj, rc.auth, rpcMgr)
+	targetHostname := rpcMgr.GetTargetHost()
+	return builder.CARegistryData{
+		CASecurity:                  certAbuse.ProcessRegistryEnrollmentPermissions(ctx, caName, targetHostname, objectSid, targetDomain),
+		EnrollmentAgentRestrictions: certAbuse.ProcessEAPermissions(ctx, caName, targetHostname, objectSid, targetDomain),
+		IsUserSpecifiesSanEnabled:   certAbuse.IsUserSpecifiesSanEnabled(caName),
+		IsRoleSeparationEnabled:     certAbuse.IsRoleSeparationEnabled(caName),
 	}
-
-	result.CASecurity = certAbuse.ProcessRegistryEnrollmentPermissions(ctx, caName, targetHostname, objectSid, targetDomain)
-	result.EnrollmentAgentRestrictions = certAbuse.ProcessEAPermissions(ctx, caName, targetHostname, objectSid, targetDomain)
-	result.IsUserSpecifiesSanEnabled = certAbuse.IsUserSpecifiesSanEnabled(caName)
-	result.IsRoleSeparationEnabled = certAbuse.IsRoleSeparationEnabled(caName)
-
-	return result
 }
 
 func (rc *RemoteCollector) collectHttpEnrollmentEndpoints(ctx context.Context, caName string, targetHost string) []builder.CAEnrollmentEndpointAPIResult {
@@ -58,60 +60,78 @@ func (rc *RemoteCollector) collectHttpEnrollmentEndpoints(ctx context.Context, c
 }
 
 // CollectRemoteEnterpriseCAWithContext wraps CollectRemoteEnterpriseCA with hard timeout enforcement.
-func (rc *RemoteCollector) CollectRemoteEnterpriseCAWithContext(ctx context.Context, target EnterpriseCACollectionTarget) EnterpriseCARemoteCollectionResult {
-	resultCh := make(chan EnterpriseCARemoteCollectionResult, 1)
-	startTime := time.Now()
+// Returns the result and a boolean indicating if the collection completed successfully (true = success, false = aborted).
+// On timeout, returns partial results collected before the timeout.
+func (rc *RemoteCollector) CollectRemoteEnterpriseCAWithContext(ctx context.Context, target EnterpriseCACollectionTarget) (EnterpriseCARemoteCollectionResult, bool) {
+	result := EnterpriseCARemoteCollectionResult{GUID: target.GUID, DN: target.DN}
+	done := make(chan struct{})
+	var mu sync.Mutex
 
 	go func() {
-		resultCh <- rc.CollectRemoteEnterpriseCA(target)
+		rc.CollectRemoteEnterpriseCA(ctx, target, &result, &mu)
+		close(done)
 	}()
 
 	select {
-	case result := <-resultCh:
-		return result
+	case <-done:
+		return result, true
 	case <-ctx.Done():
-		rc.logger.Log1("❌ [red][%s[] Aborted after %v (timeout hit?)[-]", target.DNSHostName, time.Since(startTime).Round(time.Millisecond))
-		return EnterpriseCARemoteCollectionResult{}
+		// Lock to safely read partial results while worker may still be writing
+		mu.Lock()
+		snapshot := result
+		mu.Unlock()
+		return snapshot, false
 	}
 }
 
-func (rc *RemoteCollector) CollectRemoteEnterpriseCA(target EnterpriseCACollectionTarget) EnterpriseCARemoteCollectionResult {
+func (rc *RemoteCollector) CollectRemoteEnterpriseCA(ctx context.Context, target EnterpriseCACollectionTarget, result *EnterpriseCARemoteCollectionResult, mu *sync.Mutex) {
 	totalStart := time.Now()
+	rpcManager := NewRPCManager(target.DNSHostName, rc.auth)
+	defer rpcManager.Close()
 
-	methodTimes := make(map[string]time.Duration)
-	result := EnterpriseCARemoteCollectionResult{
-		GUID: target.GUID,
+	if rc.noCrossDomain && !strings.EqualFold(target.Domain, rc.auth.Creds().Domain) {
+		rc.logger.Log1("🦘 [yellow][%s[] Skipped Enterprise CA (cross-domain auth disabled)[-]", target.DNSHostName)
+		return
 	}
 
+	methodTimes := rpcManager.GetMethodTimes()
 	var stepStart time.Time
 
-	resolveCtx, resolveCancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
-	objectSid, ok := resolveHostname(resolveCtx, rc.auth, target.DNSHostName, target.Domain)
+	resolveCtx, resolveCancel := context.WithTimeout(ctx, rc.RemoteMethodTimeout)
+	objectSid, ok := resolveHostname(resolveCtx, rpcManager, target.Domain)
 	resolveCancel()
 	if ok {
+		mu.Lock()
 		result.HostingComputer = objectSid
-	}
-
-	// Use IPAddress for RPC connections if available, otherwise fall back to DNSHostName
-	targetHost := target.IPAddress
-	if targetHost == "" {
-		targetHost = target.DNSHostName
+		mu.Unlock()
 	}
 
 	if rc.RuntimeOptions.IsMethodEnabled("certservices") {
+		if ctx.Err() != nil {
+			return
+		}
 		stepStart = time.Now()
-		stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
-		result.HttpEnrollmentEndpoints = rc.collectHttpEnrollmentEndpoints(stepCtx, target.CAName, targetHost)
+		stepCtx, cancel := context.WithTimeout(ctx, rc.RemoteMethodTimeout)
+		httpEndpoints := rc.collectHttpEnrollmentEndpoints(stepCtx, target.CAName, rpcManager.GetTargetHost())
 		cancel()
 		methodTimes["certservices"] = time.Since(stepStart)
+		mu.Lock()
+		result.HttpEnrollmentEndpoints = httpEndpoints
+		mu.Unlock()
 	}
 
 	if rc.RuntimeOptions.IsMethodEnabled("caregistry") {
+		if ctx.Err() != nil {
+			return
+		}
 		stepStart = time.Now()
-		stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
-		result.CARegistryData = rc.collectEnterpriseCARegistryData(stepCtx, target.CAName, targetHost, objectSid, target.Domain)
+		stepCtx, cancel := context.WithTimeout(ctx, rc.RemoteMethodTimeout)
+		caRegData := rc.collectEnterpriseCARegistryData(stepCtx, target.CAName, objectSid, target.Domain, rpcManager)
 		cancel()
 		methodTimes["caregistry"] = time.Since(stepStart)
+		mu.Lock()
+		result.CARegistryData = caRegData
+		mu.Unlock()
 	}
 
 	// Log method times summary
@@ -119,16 +139,4 @@ func (rc *RemoteCollector) CollectRemoteEnterpriseCA(target EnterpriseCACollecti
 		totalTime := time.Since(totalStart)
 		rc.logger.Log2("📋 [%s[] Collected in %s: %s", target.DNSHostName, totalTime.Round(time.Millisecond), formatMethodTimes(methodTimes))
 	}
-
-	return result
-}
-
-func mergeRemoteEnterpriseCACollection(enterpriseCa *builder.EnterpriseCA, rc *EnterpriseCARemoteCollectionResult) {
-	enterpriseCa.CARegistryData = rc.CARegistryData
-	enterpriseCa.HttpEnrollmentEndpoints = rc.HttpEnrollmentEndpoints
-	enterpriseCa.HostingComputer = rc.HostingComputer
-	enterpriseCa.Properties.EnrollmentAgentRestrictionsCollected = rc.CARegistryData.EnrollmentAgentRestrictions.Collected
-	enterpriseCa.Properties.IsUserSpecifiesSanEnabledCollected = rc.CARegistryData.IsUserSpecifiesSanEnabled.Collected
-	enterpriseCa.Properties.RoleSeparationEnabledCollected = rc.CARegistryData.IsRoleSeparationEnabled.Collected
-	enterpriseCa.Properties.CASecurityCollected = rc.CARegistryData.CASecurity.Collected
 }

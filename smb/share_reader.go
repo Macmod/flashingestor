@@ -1,3 +1,5 @@
+package smb
+
 // Package smb provides SMB client functionality for reading files from
 // network shares, primarily for GPO-related data collection.
 //
@@ -5,7 +7,6 @@
 // and share mounts per server:share combination. This avoids the overhead of
 // re-establishing connections for multiple file reads from the same share.
 // Call Close() when done to release all pooled resources.
-package smb
 
 import (
 	"context"
@@ -23,6 +24,7 @@ import (
 
 // shareConnection represents a cached connection to an SMB share
 type shareConnection struct {
+	mu      sync.Mutex
 	tcpConn net.Conn
 	session *smb2.Session
 	share   *smb2.Share
@@ -45,32 +47,25 @@ func NewFileReader(auth *config.CredentialMgr) *FileReader {
 	}
 }
 
-// getOrCreateConnection returns a cached connection or creates a new one
-func (fr *FileReader) getOrCreateConnection(ctx context.Context, server, shareName string) (*shareConnection, error) {
+// getOrCreateConnection returns a cached connection or creates a new one, and increments refcnt.
+func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareConnection, error) {
 	key := server + ":" + shareName
 
-	// Check if we have a cached connection
-	fr.mu.RLock()
-	conn, exists := fr.connections[key]
-	fr.mu.RUnlock()
-
-	if exists {
-		return conn, nil
-	}
-
-	// Create new connection
+	// First, try to get an existing connection
 	fr.mu.Lock()
-	defer fr.mu.Unlock()
-
-	// Double-check after acquiring write lock
-	if conn, exists := fr.connections[key]; exists {
+	conn, exists := fr.connections[key]
+	if exists {
+		fr.mu.Unlock()
 		return conn, nil
 	}
+	fr.mu.Unlock()
 
 	// Create target and SMB dialer
 	target := fr.auth.NewTarget("host", server)
 	target.Port = "445"
 
+	ctx, cancel := context.WithTimeout(context.Background(), config.SMB_TIMEOUT)
+	defer cancel()
 	smbDialer, err := smbauth.Dialer(ctx, fr.auth.Creds(), target, &smbauth.Options{
 		KerberosDialer: fr.auth.Dialer(config.KERBEROS_TIMEOUT),
 	})
@@ -86,7 +81,7 @@ func (fr *FileReader) getOrCreateConnection(ctx context.Context, server, shareNa
 	}
 
 	// Create SMB session
-	sess, err := smbDialer.DialContext(ctx, tcpConn)
+	sess, err := smbDialer.Dial(tcpConn)
 	if err != nil {
 		tcpConn.Close()
 		return nil, fmt.Errorf("create session: %w", err)
@@ -107,8 +102,9 @@ func (fr *FileReader) getOrCreateConnection(ctx context.Context, server, shareNa
 		server:  server,
 		name:    shareName,
 	}
-
+	fr.mu.Lock()
 	fr.connections[key] = conn
+	fr.mu.Unlock()
 	return conn, nil
 }
 
@@ -134,57 +130,51 @@ func (fr *FileReader) Close() {
 
 // ReadFile reads a file from a UNC path (e.g., \\server\share\path\to\file.txt)
 // and returns its contents as a byte slice. Reuses connections when possible.
-func (fr *FileReader) ReadFile(ctx context.Context, uncPath string) ([]byte, error) {
+func (fr *FileReader) ReadFile(uncPath string) ([]byte, error) {
 	// Parse UNC path: \\server\share\path\to\file
 	server, shareName, filePath, err := parseUNCPathWithServer(uncPath)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get or create connection to this share
-	conn, err := fr.getOrCreateConnection(ctx, server, shareName)
+	conn, err := fr.getOrCreateConnection(server, shareName)
 	if err != nil {
 		return nil, err
 	}
 
-	// Open the file
 	file, err := conn.share.OpenFile(filePath, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open file %s: %w", filePath, err)
 	}
-	defer file.Close()
 
-	// Read the file contents
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return nil, fmt.Errorf("read file %s: %w", filePath, err)
+	data, readErr := io.ReadAll(file)
+	file.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("read file %s: %w", filePath, readErr)
 	}
 
 	return data, nil
 }
 
 // FileExists checks if a file exists at the given UNC path. Reuses connections when possible.
-func (fr *FileReader) FileExists(ctx context.Context, uncPath string) (bool, error) {
+func (fr *FileReader) FileExists(uncPath string) (bool, error) {
 	server, shareName, filePath, err := parseUNCPathWithServer(uncPath)
 	if err != nil {
 		return false, err
 	}
 
-	// Get or create connection to this share
-	conn, err := fr.getOrCreateConnection(ctx, server, shareName)
+	conn, err := fr.getOrCreateConnection(server, shareName)
 	if err != nil {
 		return false, err
 	}
 
-	// Try to stat the file
-	_, err = conn.share.Stat(filePath)
-	if err != nil {
-		if strings.Contains(err.Error(), "file does not exist") || strings.Contains(err.Error(), "object name not found") {
+	_, statErr := conn.share.Stat(filePath)
+	if statErr != nil {
+		if strings.Contains(statErr.Error(), "file does not exist") || strings.Contains(statErr.Error(), "object name not found") {
 			return false, nil
 		}
-		return false, fmt.Errorf("stat file %s: %w", filePath, err)
+		return false, fmt.Errorf("stat file %s: %w", filePath, statErr)
 	}
-
 	return true, nil
 }
 

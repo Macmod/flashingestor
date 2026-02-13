@@ -2,8 +2,6 @@ package bloodhound
 
 import (
 	"context"
-	"net"
-	"strconv"
 	"strings"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
@@ -40,19 +38,6 @@ func (rc *RemoteCollector) collectLdapServices(ctx context.Context, targetHost s
 	}
 
 	return result
-}
-
-// checkPortOpen attempts to connect to a port with a timeout
-func checkPortOpen(ctx context.Context, dialer *net.Dialer, host string, port int) (bool, error) {
-	address := net.JoinHostPort(host, strconv.Itoa(port))
-
-	conn, err := dialer.DialContext(ctx, "tcp", address)
-	if err != nil {
-		return false, err
-	}
-	defer conn.Close()
-
-	return true, nil
 }
 
 func checkChannelBindingRequired(ctx context.Context, host string, auth *config.CredentialMgr) bool {

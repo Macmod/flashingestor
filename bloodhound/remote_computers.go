@@ -2,9 +2,12 @@ package bloodhound
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
+	"github.com/Macmod/flashingestor/config"
 )
 
 // CollectionTarget identifies a computer for remote data collection.
@@ -12,7 +15,6 @@ type CollectionTarget struct {
 	SID                string
 	DNSHostName        string
 	SamName            string
-	IPAddress          string
 	IsDC               bool
 	Domain             string
 	OperatingSystem    string
@@ -22,20 +24,22 @@ type CollectionTarget struct {
 
 // RemoteCollectionResult holds all data collected remotely from a computer.
 type RemoteCollectionResult struct {
-	SID                string                              `json:"SID"`
-	LocalGroups        []builder.LocalGroupAPIResult       `json:"LocalGroups"`
-	Sessions           builder.SessionAPIResult            `json:"Sessions"`
-	PrivilegedSessions builder.SessionAPIResult            `json:"PrivilegedSessions"`
-	RegistrySessions   builder.SessionAPIResult            `json:"RegistrySessions"`
-	DCRegistryData     builder.DCRegistryData              `json:"DCRegistryData"`
-	NTLMRegistryData   builder.NTLMRegistryData            `json:"NTLMRegistryData"`
-	UserRights         []builder.UserRightsAPIResult       `json:"UserRights"`
-	IsWebClientRunning builder.IsWebClientRunningAPIResult `json:"IsWebClientRunning"`
-	LdapServices       builder.LdapServicesResult          `json:"LdapServices"`
-	SMBInfo            *builder.SMBInfoAPIResult           `json:"SMBInfo"`
-	Status             builder.ComputerStatus              `json:"Status"`
+	SID                   string
+	LocalGroups           []builder.LocalGroupAPIResult
+	Sessions              builder.SessionAPIResult
+	PrivilegedSessions    builder.SessionAPIResult
+	RegistrySessions      builder.SessionAPIResult
+	DCRegistryData        builder.DCRegistryData
+	NTLMRegistryData      builder.NTLMRegistryData
+	UserRights            []builder.UserRightsAPIResult
+	IsWebClientRunning    builder.IsWebClientRunningAPIResult
+	LdapServices          builder.LdapServicesResult
+	SMBInfo               *builder.SMBInfoAPIResult
+	Status                *builder.ComputerStatus
+	AttemptedMethodsCount int `msgpack:"-"` // Not serialized (only used for progress tracking)
 }
 
+// Small helper as computer results include many fields to update
 func (rcr *RemoteCollectionResult) StoreInComputer(computer *builder.Computer) {
 	computer.LocalGroups = rcr.LocalGroups
 	computer.PrivilegedSessions = rcr.PrivilegedSessions
@@ -67,115 +71,252 @@ func (rcr *RemoteCollectionResult) StoreInComputer(computer *builder.Computer) {
 	}
 }
 
+// CountAttemptedMethods returns the number of collection methods that were attempted (ran, whether successful or not)
+func (rcr *RemoteCollectionResult) CountAttemptedMethods() int {
+	return rcr.AttemptedMethodsCount
+}
+
+// GetTotalMethods returns the total number of collection methods enabled for this target
+func (rcr *RemoteCollectionResult) GetTotalMethods(runtimeOptions *config.RuntimeOptions, isDC bool) int {
+	total := 0
+
+	// Count all enabled methods
+	if runtimeOptions.IsMethodEnabled("regsessions") {
+		total++
+	}
+	if runtimeOptions.IsMethodEnabled("ntlmregistry") {
+		total++
+	}
+	if runtimeOptions.IsMethodEnabled("smbinfo") {
+		total++
+	}
+	if runtimeOptions.IsMethodEnabled("localgroups") {
+		total++
+	}
+	if runtimeOptions.IsMethodEnabled("userrights") {
+		total++
+	}
+	if runtimeOptions.IsMethodEnabled("loggedon") {
+		total++
+	}
+	if runtimeOptions.IsMethodEnabled("sessions") {
+		total++
+	}
+	if runtimeOptions.IsMethodEnabled("webclient") {
+		total++
+	}
+
+	// DC-only methods
+	if isDC {
+		if runtimeOptions.IsMethodEnabled("dcregistry") {
+			total++
+		}
+		if runtimeOptions.IsMethodEnabled("ldapservices") {
+			total++
+		}
+	}
+
+	return total
+}
+
 // CollectRemoteComputerWithContext wraps CollectRemoteComputer with hard timeout enforcement.
-func (rc *RemoteCollector) CollectRemoteComputerWithContext(ctx context.Context, target CollectionTarget) RemoteCollectionResult {
-	resultCh := make(chan RemoteCollectionResult, 1)
-	startTime := time.Now()
+// Returns the result and a boolean indicating if the collection completed successfully (true = success, false = aborted).
+// On timeout, returns partial results collected before the timeout.
+func (rc *RemoteCollector) CollectRemoteComputerWithContext(ctx context.Context, target CollectionTarget) (RemoteCollectionResult, bool) {
+	result := RemoteCollectionResult{SID: target.SID}
+	done := make(chan struct{})
+	var mu sync.Mutex
 
 	go func() {
-		resultCh <- rc.CollectRemoteComputer(target)
+		defer close(done)
+		skipAuth := rc.noCrossDomain && !strings.EqualFold(target.Domain, rc.auth.Creds().Domain)
+		if skipAuth {
+			rc.logger.Log1("🦘 [yellow][%s[] Skipped Computer (cross-domain auth disabled)[-]", target.DNSHostName)
+			return
+		}
+
+		rc.CollectRemoteComputer(ctx, target, &result, &mu)
 	}()
 
 	select {
-	case result := <-resultCh:
-		return result
+	case <-done:
+		return result, true
 	case <-ctx.Done():
-		rc.logger.Log1("❌ [red][%s[] Aborted after %v (timeout hit?)[-]", target.DNSHostName, time.Since(startTime).Round(time.Millisecond))
-		return RemoteCollectionResult{}
+		// Lock to safely read partial results while worker may still be writing
+		mu.Lock()
+		snapshot := result
+		mu.Unlock()
+		return snapshot, false
 	}
 }
 
-func (rc *RemoteCollector) CollectRemoteComputer(target CollectionTarget) RemoteCollectionResult {
+func (rc *RemoteCollector) CollectRemoteComputer(ctx context.Context, target CollectionTarget, result *RemoteCollectionResult, mu *sync.Mutex) {
 	totalStart := time.Now()
+	rpcManager := NewRPCManager(target.DNSHostName, rc.auth)
+	defer rpcManager.Close()
 
-	methodTimes := make(map[string]time.Duration)
-	result := RemoteCollectionResult{
-		SID: target.SID,
-	}
-
+	methodTimes := rpcManager.GetMethodTimes()
 	var stepStart time.Time
 
-	// Each method should have its own independent context
-	if rc.RuntimeOptions.IsMethodEnabled("localgroups") {
+	// Uses Winreg RPC
+	if rc.RuntimeOptions.IsMethodEnabled("regsessions") {
+		if ctx.Err() != nil {
+			return
+		}
 		stepStart = time.Now()
-		stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
-		result.LocalGroups = rc.collectLocalGroups(stepCtx, target.IPAddress, target.DNSHostName, target.SID, target.IsDC, target.Domain)
+		regSessions := rc.collectRegistrySessions(ctx, target.SID, rpcManager)
+		methodTimes["regsessions"] = time.Since(stepStart)
+		mu.Lock()
+		result.RegistrySessions = regSessions
+		result.AttemptedMethodsCount++
+		mu.Unlock()
+	}
+
+	// Uses Winreg RPC
+	if rc.RuntimeOptions.IsMethodEnabled("ntlmregistry") {
+		if ctx.Err() != nil {
+			return
+		}
+		stepStart = time.Now()
+		ntlmData := rc.collectNTLMRegistryData(ctx, rpcManager)
+		methodTimes["ntlmregistry"] = time.Since(stepStart)
+		mu.Lock()
+		result.NTLMRegistryData = ntlmData
+		result.AttemptedMethodsCount++
+		mu.Unlock()
+	}
+
+	// Uses Winreg RPC
+	if target.IsDC && rc.RuntimeOptions.IsMethodEnabled("dcregistry") {
+		if ctx.Err() != nil {
+			return
+		}
+		stepStart = time.Now()
+		dcRegData := rc.collectDCRegistryData(ctx, rpcManager)
+		methodTimes["dcregistry"] = time.Since(stepStart)
+		mu.Lock()
+		result.DCRegistryData = dcRegData
+		result.AttemptedMethodsCount++
+		mu.Unlock()
+	}
+
+	// Uses Winreg RPC
+	// (pending checks with raw SMB negotiation)
+	if rc.RuntimeOptions.IsMethodEnabled("smbinfo") {
+		if ctx.Err() != nil {
+			return
+		}
+		stepStart = time.Now()
+		smbInfo := rc.collectSmbInfo(ctx, rpcManager)
+		methodTimes["smbinfo"] = time.Since(stepStart)
+		mu.Lock()
+		result.SMBInfo = &smbInfo
+		result.AttemptedMethodsCount++
+		mu.Unlock()
+	}
+
+	// Uses Samr RPC & Lsat RPC
+	if rc.RuntimeOptions.IsMethodEnabled("localgroups") {
+		if ctx.Err() != nil {
+			return
+		}
+		stepStart = time.Now()
+		stepCtx, cancel := context.WithTimeout(ctx, rc.RemoteMethodTimeout)
+		localGroups := rc.collectLocalGroups(stepCtx, target.SID, target.IsDC, target.Domain, rpcManager)
 		cancel()
 		methodTimes["localgroups"] = time.Since(stepStart)
+		mu.Lock()
+		result.LocalGroups = localGroups
+		result.AttemptedMethodsCount++
+		mu.Unlock()
 	}
-	if rc.RuntimeOptions.IsMethodEnabled("loggedon") {
-		stepStart = time.Now()
-		stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
-		result.PrivilegedSessions = rc.collectPrivilegedSessions(stepCtx, target.IPAddress, target.SamName, target.SID)
-		cancel()
-		methodTimes["loggedon"] = time.Since(stepStart)
-	}
-	if rc.RuntimeOptions.IsMethodEnabled("sessions") {
-		stepStart = time.Now()
-		stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
-		result.Sessions = rc.collectSessions(stepCtx, target.IPAddress, target.SID, target.Domain)
-		cancel()
-		methodTimes["sessions"] = time.Since(stepStart)
-	}
-	if rc.RuntimeOptions.IsMethodEnabled("regsessions") {
-		stepStart = time.Now()
-		stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
-		result.RegistrySessions = rc.collectRegistrySessions(stepCtx, target.IPAddress, target.SID)
-		cancel()
-		methodTimes["regsessions"] = time.Since(stepStart)
-	}
-	if rc.RuntimeOptions.IsMethodEnabled("ntlmregistry") {
-		stepStart = time.Now()
-		stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
-		result.NTLMRegistryData = rc.collectNTLMRegistryData(stepCtx, target.IPAddress)
-		cancel()
-		methodTimes["ntlmregistry"] = time.Since(stepStart)
-	}
+
+	// Uses Lsad RPC & Lsat RPC
 	if rc.RuntimeOptions.IsMethodEnabled("userrights") {
+		if ctx.Err() != nil {
+			return
+		}
 		stepStart = time.Now()
-		stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
-		result.UserRights = rc.collectUserRights(stepCtx, target.IPAddress, target.DNSHostName, target.SID, target.IsDC, target.Domain)
+		stepCtx, cancel := context.WithTimeout(ctx, rc.RemoteMethodTimeout)
+		userRights := rc.collectUserRights(stepCtx, target.SID, target.IsDC, target.Domain, rpcManager)
 		cancel()
 		methodTimes["userrights"] = time.Since(stepStart)
+		mu.Lock()
+		result.UserRights = userRights
+		result.AttemptedMethodsCount++
+		mu.Unlock()
 	}
-	if rc.RuntimeOptions.IsMethodEnabled("webclient") {
+
+	// Uses WksSvc RPC
+	if rc.RuntimeOptions.IsMethodEnabled("loggedon") {
+		if ctx.Err() != nil {
+			return
+		}
 		stepStart = time.Now()
-		stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
-		result.IsWebClientRunning = rc.collectIsWebClientRunning(stepCtx, target.IPAddress)
+		stepCtx, cancel := context.WithTimeout(ctx, rc.RemoteMethodTimeout)
+		privSessions := rc.collectPrivilegedSessions(stepCtx, target.SamName, target.SID, rpcManager)
+		cancel()
+		methodTimes["loggedon"] = time.Since(stepStart)
+		mu.Lock()
+		result.PrivilegedSessions = privSessions
+		result.AttemptedMethodsCount++
+		mu.Unlock()
+	}
+
+	// Uses SrvSvc RPC
+	if rc.RuntimeOptions.IsMethodEnabled("sessions") {
+		if ctx.Err() != nil {
+			return
+		}
+		stepStart = time.Now()
+		stepCtx, cancel := context.WithTimeout(ctx, rc.RemoteMethodTimeout)
+		sessions := rc.collectSessions(stepCtx, target.SID, target.Domain, rpcManager)
+		cancel()
+		methodTimes["sessions"] = time.Since(stepStart)
+		mu.Lock()
+		result.Sessions = sessions
+		result.AttemptedMethodsCount++
+		mu.Unlock()
+	}
+
+	// Uses SMB to check "DAV RPC Service" named pipe
+	if rc.RuntimeOptions.IsMethodEnabled("webclient") {
+		if ctx.Err() != nil {
+			return
+		}
+		stepStart = time.Now()
+		stepCtx, cancel := context.WithTimeout(ctx, rc.RemoteMethodTimeout)
+		webClient := rc.collectIsWebClientRunning(stepCtx, target.DNSHostName)
 		cancel()
 		methodTimes["webclient"] = time.Since(stepStart)
+		mu.Lock()
+		result.IsWebClientRunning = webClient
+		result.AttemptedMethodsCount++
+		mu.Unlock()
 	}
-	if rc.RuntimeOptions.IsMethodEnabled("smbinfo") {
+
+	// Just port checks & LDAP/LDAPS auth
+	if target.IsDC && rc.RuntimeOptions.IsMethodEnabled("ldapservices") {
+		if ctx.Err() != nil {
+			return
+		}
 		stepStart = time.Now()
-		stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
-		smbInfo := rc.collectSmbInfo(stepCtx, target.IPAddress)
-		result.SMBInfo = &smbInfo
+		stepCtx, cancel := context.WithTimeout(ctx, rc.RemoteMethodTimeout)
+		ldapServices := rc.collectLdapServices(stepCtx, target.DNSHostName)
 		cancel()
-		methodTimes["smbinfo"] = time.Since(stepStart)
-	}
-
-	if target.IsDC {
-		if rc.RuntimeOptions.IsMethodEnabled("dcregistry") {
-			stepStart = time.Now()
-			stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
-			result.DCRegistryData = rc.collectDCRegistryData(stepCtx, target.IPAddress)
-			cancel()
-			methodTimes["dcregistry"] = time.Since(stepStart)
-		}
-
-		if rc.RuntimeOptions.IsMethodEnabled("ldapservices") {
-			stepStart = time.Now()
-			stepCtx, cancel := context.WithTimeout(context.Background(), rc.RemoteMethodTimeout)
-			result.LdapServices = rc.collectLdapServices(stepCtx, target.IPAddress)
-			cancel()
-			methodTimes["ldapservices"] = time.Since(stepStart)
-		}
+		methodTimes["ldapservices"] = time.Since(stepStart)
+		mu.Lock()
+		result.LdapServices = ldapServices
+		result.AttemptedMethodsCount++
+		mu.Unlock()
 	}
 
 	totalTime := time.Since(totalStart)
 	if len(methodTimes) > 0 {
 		rc.logger.Log2("💻 [%s[] Collected in %s: %s", target.DNSHostName, totalTime.Round(time.Millisecond), formatMethodTimes(methodTimes))
+	} else {
+		rc.logger.Log2("💻 [%s[] Collected in %s", target.DNSHostName, totalTime.Round(time.Millisecond))
 	}
 
-	return result
+	return
 }

@@ -331,8 +331,10 @@ func (c *SimpleCache) Clear() {
 
 // GPOCacheEntry stores GPO attributes needed for local group processing
 type GPOCacheEntry struct {
-	GPCFileSysPath string
-	Flags          string
+	Name    string
+	GUID    string
+	GPOPath string
+	Flags   string
 }
 
 // GPOCache maintains GPO entries indexed by DN

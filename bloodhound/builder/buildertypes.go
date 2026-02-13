@@ -187,13 +187,21 @@ type OUProperties struct {
 }
 
 // GPOChanges represents GPO-related deltas linked to an OU or domain.
-// (theoretically Sites too, but we don't model Sites in BloodHound)
+// (theoretically Sites too, but those are not used in BloodHound)
 type GPOChanges struct {
 	AffectedComputers  []TypedPrincipal `json:"AffectedComputers"`
 	DcomUsers          []TypedPrincipal `json:"DcomUsers"`
 	LocalAdmins        []TypedPrincipal `json:"LocalAdmins"`
 	PSRemoteUsers      []TypedPrincipal `json:"PSRemoteUsers"`
 	RemoteDesktopUsers []TypedPrincipal `json:"RemoteDesktopUsers"`
+}
+
+// IsEmpty checks if there are any GPO changes recorded.
+func (gc *GPOChanges) IsEmpty() bool {
+	return len(gc.DcomUsers) == 0 &&
+		len(gc.LocalAdmins) == 0 &&
+		len(gc.PSRemoteUsers) == 0 &&
+		len(gc.RemoteDesktopUsers) == 0
 }
 
 // GPO represents a Group Policy Object in AD.
@@ -311,7 +319,7 @@ type Computer struct {
 	RegistrySessions        SessionAPIResult            `json:"RegistrySessions"`
 	Properties              ComputerProperties          `json:"Properties"`
 	HasSIDHistory           []TypedPrincipal            `json:"HasSIDHistory"`
-	Status                  ComputerStatus              `json:"Status"`
+	Status                  *ComputerStatus             `json:"Status"`
 	UserRights              []UserRightsAPIResult       `json:"UserRights"`
 	DumpSMSAPassword        []TypedPrincipal            `json:"DumpSMSAPassword"`
 	DCRegistryData          DCRegistryData              `json:"DCRegistryData"`

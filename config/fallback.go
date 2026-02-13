@@ -146,7 +146,7 @@ func FallbackOptions() *RuntimeOptions {
 		"localgroups",
 		"ldapservices",
 		"smbinfo",
-		//"gpolocalgroup",
+		"gpolocalgroup",
 	}
 
 	// Availability checks defaults

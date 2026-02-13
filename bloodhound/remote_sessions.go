@@ -7,23 +7,21 @@ import (
 	"strings"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
-	"github.com/Macmod/flashingestor/msrpc"
 )
 
 // collectSessions retrieves active network sessions from a target system via SRVSVC RPC
-func (rc *RemoteCollector) collectSessions(ctx context.Context, targetHost string, computerSid string, targetDomain string) builder.SessionAPIResult {
+func (rc *RemoteCollector) collectSessions(ctx context.Context, computerSid string, targetDomain string, rpcMgr *RPCManager) builder.SessionAPIResult {
 	result := builder.SessionAPIResult{
 		APIResult: builder.APIResult{Collected: false},
 		Results:   []builder.Session{},
 	}
 
-	rpcObj, err := msrpc.NewSrvsvcRPC(ctx, targetHost, rc.auth)
+	rpcObj, err := rpcMgr.GetOrCreateSrvsvcRPC(ctx)
 	if err != nil {
 		errStr := fmt.Sprint(err)
 		result.FailureReason = &errStr
 		return result
 	}
-	defer rpcObj.Close()
 
 	sessions, err := rpcObj.GetSessions(ctx)
 	if err != nil {
@@ -66,7 +64,10 @@ func (rc *RemoteCollector) collectSessions(ctx context.Context, targetHost strin
 				}
 			}
 
-			realComputerSid, ok := resolveHostname(ctx, rc.auth, computerSessionName, targetDomain)
+			// Create temporary RPCManager for hostname resolution
+			resolveRpcMgr := NewRPCManager(computerSessionName, rc.auth)
+			realComputerSid, ok := resolveHostname(ctx, resolveRpcMgr, targetDomain)
+			resolveRpcMgr.Close()
 			if ok {
 				resolvedComputerSID = realComputerSid
 			}

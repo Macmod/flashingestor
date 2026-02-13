@@ -7,7 +7,6 @@ import (
 	"unicode/utf16"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
-	"github.com/Macmod/flashingestor/msrpc"
 )
 
 // parseRegistryMultiString decodes a REG_MULTI_SZ registry value from UTF-16 LE null-separated byte data
@@ -40,21 +39,20 @@ func parseRegistryMultiString(valBytes []byte) []string {
 }
 
 // collectNTLMRegistryData retrieves NTLM authentication configuration from a target system's registry
-func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, targetHost string) builder.NTLMRegistryData {
+func (rc *RemoteCollector) collectNTLMRegistryData(ctx context.Context, rpcMgr *RPCManager) builder.NTLMRegistryData {
 	result := builder.NTLMRegistryData{
 		APIResult: builder.APIResult{
 			Collected: true,
 		},
 	}
 
-	mrpcObj, err := msrpc.NewWinregRPC(ctx, targetHost, rc.auth)
+	mrpcObj, err := rpcMgr.GetOrCreateWinregRPC(ctx)
 	if err != nil {
-		errStr := fmt.Sprintf("RPC failure: %v", err)
+		errStr := fmt.Sprintf("failed to create WinregRPC: %v", err)
 		result.APIResult.Collected = false
 		result.APIResult.FailureReason = &errStr
 		return result
 	}
-	defer mrpcObj.Close()
 
 	// Open HKLM once and reuse for all queries
 	hiveHandle, err := mrpcObj.OpenLocalMachine()

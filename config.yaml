@@ -230,7 +230,7 @@ remote_collection:
     - localgroups
     - ldapservices
     - smbinfo
-    #- gpolocalgroup
+    - gpolocalgroup
 
   # Availability checks to run before remote collection
   #  

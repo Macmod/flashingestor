@@ -3,21 +3,18 @@ package bloodhound
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
-	"github.com/Macmod/flashingestor/msrpc"
 )
 
 // collectDCRegistryData retrieves security-relevant registry values from a domain controller
-func (rc *RemoteCollector) collectDCRegistryData(ctx context.Context, targetHost string) builder.DCRegistryData {
+func (rc *RemoteCollector) collectDCRegistryData(ctx context.Context, rpcMgr *RPCManager) builder.DCRegistryData {
 	result := builder.DCRegistryData{}
 
-	mrpcObj, err := msrpc.NewWinregRPC(ctx, targetHost, rc.auth)
+	mrpcObj, err := rpcMgr.GetOrCreateWinregRPC(ctx)
 	if err != nil {
 		return result
 	}
-	defer mrpcObj.Close()
 
 	// Open HKLM once and reuse for all queries
 	hiveHandle, err := mrpcObj.OpenLocalMachine()
@@ -48,7 +45,7 @@ func (rc *RemoteCollector) collectDCRegistryData(ctx context.Context, targetHost
 			Value: int(valCMMInt),
 		}
 	} else {
-		errStr := fmt.Sprintf("Get CertificateMappingMethods failed: %v", err)
+		errStr := err.Error()
 		result.CertificateMappingMethods = &builder.IntRegistryAPIResult{
 			APIResult: builder.APIResult{Collected: false, FailureReason: &errStr},
 		}
@@ -78,7 +75,7 @@ func (rc *RemoteCollector) collectDCRegistryData(ctx context.Context, targetHost
 			Value: valSCBEInt,
 		}
 	} else {
-		errStr := fmt.Sprintf("Get StrongCertificateBindingEnforcement failed: %v", err)
+		errStr := err.Error()
 		result.StrongCertificateBindingEnforcement = &builder.IntRegistryAPIResult{
 			APIResult: builder.APIResult{Collected: false, FailureReason: &errStr},
 		}
@@ -101,7 +98,7 @@ func (rc *RemoteCollector) collectDCRegistryData(ctx context.Context, targetHost
 			Value: valVCALStr,
 		}
 	} else {
-		errStr := fmt.Sprintf("Get VulnerableChannelAllowList failed: %v", err)
+		errStr := err.Error()
 		result.VulnerableNetlogonSecurityDescriptor = &builder.StrRegistryAPIResult{
 			APIResult: builder.APIResult{Collected: false, FailureReason: &errStr},
 		}

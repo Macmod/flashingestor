@@ -31,7 +31,7 @@ The main goals of this project are:
 
 - **Ingest** (`Ctrl+l`) - Collects raw object attributes' data from LDAP and stores that under `output/ldap` into intermediate `msgpack` files. Queries can be customized in `config.yaml`.
 
-- **Remote** (`Ctrl+r`) - Reads these intermediate files into memory, computes the list of computers to collect, and performs a series of RPC/HTTP requests to obtain relevant remote information for `Computer` and `EnterpriseCA` objects, which are stored under `output/remote`. DNS lookups are performed before running Remote Collection.
+- **Remote** (`Ctrl+r`) - Reads these intermediate files into memory, computes the list of computers to collect, and performs a series of RPC/HTTP requests to obtain relevant remote information for `Computer` and `EnterpriseCA` objects, which are stored under `output/remote`.
 
 - **Convert** (`Ctrl+s`) - Reads the intermediate files into memory, merges information from the ingestion and remote collection steps, and generates a Bloodhound-compatible dump under `output/bloodhound` - this step is entirely offline.
 
@@ -154,7 +154,7 @@ Contributions are welcome by [opening an issue](https://github.com/Macmod/flashi
 
 ## Remote Collection
 
-* `GPOChanges` collection is not implemented for `Domain` / `OrganizationalUnit` types.
+* Similarly as the restriction of methods allowed for cross-domain authentication in ingestion, when running remote collection with Kerberos (for example, when the user is part of `Protected Users` or when NTLM authentication is blocked via security settings) or with certificates, remote collection won't try to authenticate to computers of domains that differ from the domain to which the user belongs. This also applies to the `GPOLocalGroup` method, which in those cases won't try to read GPO files from DCs of other domains, even if there are multiple domains in the ingested data.
 * `SmbInfo` for the `Computer` type is still a basic implementation (registry checks only).
 * `HttpEnrollmentEndpoints` only works with a provided username/password.
 * `AllowedToDelegateTo` / `ServicePrincipalNames` resolution is still a basic implementation.

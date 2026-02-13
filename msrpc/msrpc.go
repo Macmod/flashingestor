@@ -85,12 +85,17 @@ func newBaseRPC(ctx context.Context, targetHost string, auth *config.CredentialM
 		TODO (Future): Review if the endpoint mapper is really needed
 		At least for some flavors of RPCs that we need, using the well known endpoints is not enough.
 	*/
-	epm := epm.EndpointMapper(ctx,
+	customDialerEPM := dcerpc.WithDialer(auth.Dialer(config.DCERPC_EPM_TIMEOUT))
+
+	epmOption := epm.EndpointMapper(ctx,
 		net.JoinHostPort(target.AddressWithoutPort(), "135"),
 		dcerpc.WithInsecure(),
 		dcerpc.WithTimeout(config.DCERPC_EPM_TIMEOUT),
+		customDialerEPM,
 	)
-	dcerpcOpts = append(dcerpcOpts, epm)
+
+	customDialerRPC := dcerpc.WithDialer(auth.Dialer(config.SMB_TIMEOUT))
+	dcerpcOpts = append(dcerpcOpts, epmOption, customDialerRPC)
 
 	// Create binding string
 	binding := fmt.Sprintf("ncacn_np:%s", targetHost)

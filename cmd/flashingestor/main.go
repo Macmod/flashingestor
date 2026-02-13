@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	version = "0.2.0"
+	version = "0.3.0"
 )
 
 // Application entry point
@@ -103,7 +103,7 @@ func main() {
 	bhInst := &bloodhound.BH{}
 	bhInst.Init(
 		dirs.LDAP, dirs.Remote, dirs.BloodHound, resolver,
-		cfg.RemoteWorkers, cfg.DNSWorkers,
+		cfg.RemoteWorkers,
 		cfg.RemoteComputerTimeout, cfg.RemoteMethodTimeout,
 		cfg.RuntimeOptions, logger,
 	)
@@ -112,11 +112,17 @@ func main() {
 	if cfg.ChosenAuthIngest == "" {
 		logger.Log0("🔗 [blue]Auth method (ingestion)[-]: None")
 	} else {
-		logger.Log0("🔗 [blue]Auth method (ingestion)[-]: " + cfg.ChosenAuthIngest)
+		authMethodIngestStr := cfg.ChosenAuthIngest
+		if cfg.IngestAuth.Kerberos() {
+			authMethodIngestStr += " [blue](over Kerberos)[-]"
+		}
+
+		logger.Log0("🔗 [blue]Auth method (ingestion)[-]: " + authMethodIngestStr)
 	}
 
 	if cfg.RuntimeOptions.GetRecurseTrusts() {
-		if !slices.Contains([]string{"Password", "NTHash", "Anonymous"}, cfg.ChosenAuthIngest) || cfg.IngestAuth.Kerberos() {
+		ingestNoCrossDomain := !slices.Contains([]string{"Password", "NTHash", "Anonymous"}, cfg.ChosenAuthIngest) || cfg.IngestAuth.Kerberos()
+		if ingestNoCrossDomain {
 			// Kerberos cross-realm auth should be feasible to implement,
 			// but I don't know how yet :)
 			logger.Log0("🫠 [yellow]RecurseTrusts disabled (not supported for this auth method)[-]")
@@ -142,14 +148,30 @@ func main() {
 		appendForestDomains: cfg.RuntimeOptions.GetAppendForestDomains(),
 	}
 
-	conversionMgr := newConversionManager(bhInst, logger)
-	remoteMgr := newRemoteCollectionManager(bhInst, cfg.RemoteAuth, logger)
+	conversionMgr := newConversionManager(bhInst, uiApp, logger)
 
 	if cfg.ChosenAuthRemote == "" {
 		logger.Log0("🔗 [blue]Auth method (remote collection)[-]: None")
 	} else {
-		logger.Log0("🔗 [blue]Auth method (remote collection)[-]: " + cfg.ChosenAuthRemote)
+		authMethodRemoteStr := cfg.ChosenAuthRemote
+		if cfg.RemoteAuth.Kerberos() {
+			authMethodRemoteStr += " [blue](over Kerberos)[-]"
+		}
+
+		logger.Log0("🔗 [blue]Auth method (remote collection)[-]: " + authMethodRemoteStr)
 	}
+
+	initialDomainRemote := strings.ToUpper(cfg.RemoteAuth.Creds().Domain)
+	remoteNoCrossDomain := initialDomainRemote != "." && (!slices.Contains([]string{"Password", "NTHash", "Anonymous"}, cfg.ChosenAuthRemote) || cfg.RemoteAuth.Kerberos())
+	if remoteNoCrossDomain {
+		logger.Log0("🫠 [yellow]Remote collection methods will be limited to domain '" + initialDomainRemote + "' (cross-domain authentication not supported for this auth method)[-]")
+	}
+
+	remoteMgr := newRemoteCollectionManager(
+		bhInst,
+		uiApp,
+		logger,
+	)
 
 	// Temporary restriction until a better solution is implemented
 	// TODO: Allow for NTHash too?
@@ -175,6 +197,7 @@ func main() {
 			logger.Log0("🔗 [blue]Initial DC[-]: \"%s\"", initialDC)
 		}
 	}
+	logger.Log0("-")
 
 	var ingestionCallback, remoteCollectionCallback func()
 
@@ -241,7 +264,7 @@ func main() {
 						"Existing msgpack files detected in the remote collection output folder.\nDo you want to overwrite them?",
 						func() {
 							// User chose Yes - proceed with remote collection
-							remoteMgr.start(uiApp)
+							remoteMgr.start(cfg.RemoteAuth, remoteNoCrossDomain)
 						},
 						func() {
 							// User chose No - cancel remote collection
@@ -253,15 +276,13 @@ func main() {
 			}
 
 			// No prompt needed or no existing files - proceed with remote collection
-			remoteMgr.start(uiApp)
+			remoteMgr.start(cfg.RemoteAuth, remoteNoCrossDomain)
 		}
 	}
 
 	uiApp.SetButtonCallbacks(
 		ingestionCallback,
-		func() {
-			conversionMgr.start(uiApp)
-		},
+		conversionMgr.start,
 		remoteCollectionCallback,
 		func() {
 			// Clear cache callback

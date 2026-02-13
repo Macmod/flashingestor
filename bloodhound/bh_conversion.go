@@ -73,68 +73,125 @@ func calculateProgressMetrics(currentCount, totalCount int, startTime time.Time,
 }
 
 func (bh *BH) loadRemoteComputerResults() map[string]*RemoteCollectionResult {
-	remoteFile := filepath.Join(bh.ActiveFolder, "RemoteComputers.msgpack")
+	results := make(map[string]*RemoteCollectionResult)
 
-	file, err := os.Open(remoteFile)
+	// Scan all domain folders for RemoteComputers.msgpack files
+	entries, err := os.ReadDir(bh.ActiveFolder)
 	if err != nil {
-		// File doesn't exist or can't be opened - this is fine, remote collection may not have run
 		return nil
 	}
-	defer file.Close()
 
-	decoder := msgpack.NewDecoder(file)
-
-	results := make(map[string]*RemoteCollectionResult)
-	for {
-		var result RemoteCollectionResult
-		if err := decoder.Decode(&result); err != nil {
-			if err == io.EOF {
-				break
-			}
-			bh.log("🫠 [yellow]Could not decode remote computer result: %s[-]", err.Error())
+	for _, entry := range entries {
+		if !entry.IsDir() {
 			continue
 		}
-		if result.SID != "" {
-			results[result.SID] = &result
-		}
-	}
 
-	if len(results) > 0 {
-		bh.log("📦 Loaded remote collection data for %s Computers", strconv.Itoa(len(results)))
+		computersFile := filepath.Join(bh.ActiveFolder, entry.Name(), "RemoteComputers.msgpack")
+		file, err := os.Open(computersFile)
+		if err != nil {
+			continue // File doesn't exist for this domain
+		}
+
+		decoder := msgpack.NewDecoder(file)
+		for {
+			var result RemoteCollectionResult
+			if err := decoder.Decode(&result); err != nil {
+				if err == io.EOF {
+					break
+				}
+				bh.Logger.Log0("🫠 [yellow]Could not decode remote computer result from %s: %s[-]", entry.Name(), err.Error())
+				continue
+			}
+			if result.SID != "" {
+				results[result.SID] = &result
+			}
+		}
+		file.Close()
 	}
 
 	return results
 }
 
 func (bh *BH) loadRemoteCAResults() map[string]*EnterpriseCARemoteCollectionResult {
-	remoteFile := filepath.Join(bh.ActiveFolder, "RemoteEnterpriseCA.msgpack")
+	results := make(map[string]*EnterpriseCARemoteCollectionResult)
 
-	file, err := os.Open(remoteFile)
+	// Scan all domain folders for RemoteEnterpriseCA.msgpack files
+	entries, err := os.ReadDir(bh.ActiveFolder)
 	if err != nil {
-		// File doesn't exist or can't be opened - this is fine, remote collection may not have run
 		return nil
 	}
-	defer file.Close()
 
-	decoder := msgpack.NewDecoder(file)
-
-	results := make(map[string]*EnterpriseCARemoteCollectionResult)
-	for {
-		var result EnterpriseCARemoteCollectionResult
-		if err := decoder.Decode(&result); err != nil {
-			if err == io.EOF {
-				break
-			}
-			bh.log("🫠 [yellow]Warning: Could not decode remote CA result:[-] %v", err)
+	for _, entry := range entries {
+		if !entry.IsDir() {
 			continue
 		}
-		if result.GUID != "" {
-			results[result.GUID] = &result
+
+		caFile := filepath.Join(bh.ActiveFolder, entry.Name(), "RemoteEnterpriseCA.msgpack")
+		file, err := os.Open(caFile)
+		if err != nil {
+			continue // File doesn't exist for this domain
 		}
+
+		decoder := msgpack.NewDecoder(file)
+		for {
+			var result EnterpriseCARemoteCollectionResult
+			if err := decoder.Decode(&result); err != nil {
+				if err == io.EOF {
+					break
+				}
+				bh.Logger.Log0("🫠 [yellow]Could not decode remote CA result from %s:[-] %v", entry.Name(), err)
+				continue
+			}
+			if result.GUID != "" {
+				results[result.GUID] = &result
+			}
+		}
+		file.Close()
 	}
 
-	if len(results) > 0 {
-		bh.log("📦 Loaded remote collection data for %s Enterprise CAs", strconv.Itoa(len(results)))
+	return results
+}
+
+func (bh *BH) loadRemoteGPOChanges() map[string]*GPOLocalGroupsCollectionResult {
+	results := make(map[string]*GPOLocalGroupsCollectionResult)
+
+	// Scan for domain directories in ActiveFolder
+	dirEntries, err := os.ReadDir(bh.ActiveFolder)
+	if err != nil {
+		// ActiveFolder doesn't exist or can't be read - this is fine, remote collection may not have run
+		return nil
+	}
+
+	for _, dirEntry := range dirEntries {
+		if !dirEntry.IsDir() {
+			continue
+		}
+
+		// Try to open RemoteGPOChanges.msgpack in this domain folder
+		gpoChangesFile := filepath.Join(bh.ActiveFolder, dirEntry.Name(), "RemoteGPOChanges.msgpack")
+		file, err := os.Open(gpoChangesFile)
+		if err != nil {
+			// File doesn't exist in this domain folder - skip
+			continue
+		}
+
+		decoder := msgpack.NewDecoder(file)
+		for {
+			var entry GPOLocalGroupsCollectionResult
+			if err := decoder.Decode(&entry); err != nil {
+				if err == io.EOF {
+					break
+				}
+				bh.Logger.Log0("🫠 [yellow]Could not decode GPO changes entry from %s: %s[-]", gpoChangesFile, err.Error())
+				continue
+			}
+			if entry.DN != "" {
+				// Normalize DN to uppercase for consistent lookups
+				normalizedDN := strings.ToUpper(entry.DN)
+				results[normalizedDN] = &entry
+			}
+		}
+		file.Close()
 	}
 
 	return results
@@ -143,7 +200,7 @@ func (bh *BH) loadRemoteCAResults() map[string]*EnterpriseCARemoteCollectionResu
 func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 	writer, err := bh.GetCurrentWriter(kind)
 	if err != nil {
-		bh.log("❌ Error getting writer for kind %s: %v", kind, err)
+		bh.Logger.Log0("❌ Error getting writer for kind %s: %v", kind, err)
 		return 0
 	}
 
@@ -153,14 +210,14 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 		// Log file size after writer has been closed and flushed
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(fileName); err == nil {
-				bh.log("✅ [green]Written %s (%s)[-]", fileName, formatFileSize(fileInfo.Size()))
+				bh.Logger.Log0("✅ [green]Written %s (%s)[-]", fileName, formatFileSize(fileInfo.Size()))
 			} else {
-				bh.log("🫠 [yellow]Problem saving %s: %v[-]", fileName, err)
+				bh.Logger.Log0("🫠 [yellow]Problem saving %s: %v[-]", fileName, err)
 			}
 		}
 	}()
 
-	bh.log("📝 Writing %s to '%s'", kind, fileName)
+	bh.Logger.Log0("📝 Writing %s to '%s'", kind, fileName)
 
 	totalCount := 0
 	totalInFiles := 0
@@ -173,7 +230,7 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 	for _, fileName := range fileNames {
 		reader, err := reader.NewMPReader(fileName)
 		if err != nil {
-			bh.log("❌ Error opening file %s: %v", fileName, err)
+			bh.Logger.Log0("❌ Error opening file %s: %v", fileName, err)
 			return 0
 		}
 		defer reader.Close()
@@ -205,7 +262,7 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 		for i := 0; i < reader.Length(); i++ {
 			err := reader.ReadEntry(originalEntry)
 			if err != nil {
-				bh.log("❌ Error decoding entry: %v", err)
+				bh.Logger.Log0("❌ Error decoding entry: %v", err)
 				continue
 			}
 
@@ -235,6 +292,20 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 				bhObject, ok = builder.BuildGroupFromEntry(&wrappedEntry)
 			case "ous":
 				bhObject, ok = builder.BuildOUFromEntry(&wrappedEntry)
+				if ok && bh.RuntimeOptions.GetMergeRemote() && bh.RemoteGPOChangesCollection != nil {
+					// Enrich object with GPO changes if present
+					ouObject := bhObject.(*builder.OrganizationalUnit)
+					normalizedDN := strings.ToUpper(wrappedEntry.DN)
+					if gpoData, found := bh.RemoteGPOChangesCollection[normalizedDN]; found && !gpoData.GPOChanges.IsEmpty() {
+						// Compute affected computers during conversion
+						// Use pre-built tree cache for efficiency
+						affectedComps, err := bh.getAffectedComputers(normalizedDN, wrappedEntry.GetDomainFromDN(), bh.computerTrees)
+						if err == nil && len(affectedComps) > 0 {
+							ouObject.GPOChanges = gpoData.GPOChanges
+							ouObject.GPOChanges.AffectedComputers = affectedComps
+						}
+					}
+				}
 			case "gpos":
 				bhObject, ok = builder.BuildGPOFromEntry(&wrappedEntry)
 			case "containers":
@@ -245,7 +316,7 @@ func (bh *BH) ProcessObjects(fileNames []string, kind string, step int) int {
 					totalCount++
 				}
 			default:
-				bh.log("❌ Unknown kind: %s", kind)
+				bh.Logger.Log0("❌ Unknown kind: %s", kind)
 				continue
 			}
 
@@ -314,7 +385,7 @@ func (bh *BH) addWellKnownObjects(writer *BHFormatWriter, kind string, domainNam
 
 	domainSID, ok := builder.BState().DomainSIDCache.Get(domainName)
 	if !ok {
-		bh.log("🫠 [yellow]Could not find domain SID for domain %s to add well-known %s[-]", domainName, kind)
+		bh.Logger.Log0("🫠 [yellow]Could not find domain SID for domain %s to add well-known %s[-]", domainName, kind)
 		domainSID = "UNKNOWN"
 	}
 
@@ -356,7 +427,7 @@ func (bh *BH) ProcessDomain(step int) {
 
 	domainWriter, err := bh.GetCurrentWriter("domains")
 	if err != nil {
-		bh.log("❌ Error getting writer for domains: %v", err)
+		bh.Logger.Log0("❌ Error getting writer for domains: %v", err)
 		return
 	}
 	fileName := domainWriter.file.Name()
@@ -365,9 +436,9 @@ func (bh *BH) ProcessDomain(step int) {
 		// Log file size after writer has been closed and flushed
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(fileName); err == nil {
-				bh.log("✅ [green]Written %s (%s)[-]", fileName, formatFileSize(fileInfo.Size()))
+				bh.Logger.Log0("✅ [green]Written %s (%s)[-]", fileName, formatFileSize(fileInfo.Size()))
 			} else {
-				bh.log("🫠 [yellow]Problem saving %s: %v[-]", fileName, err)
+				bh.Logger.Log0("🫠 [yellow]Problem saving %s: %v[-]", fileName, err)
 			}
 		}
 	}()
@@ -399,14 +470,14 @@ func (bh *BH) ProcessDomain(step int) {
 
 		domainsReader, err := reader.NewMPReader(domainPath)
 		if err != nil {
-			bh.log("❌ Error opening domains file: %v", err)
+			bh.Logger.Log0("❌ Error opening domains file: %v", err)
 			continue
 		}
 		defer domainsReader.Close()
 
 		totalInFile, err := domainsReader.ReadLength()
 		if err != nil {
-			bh.log("❌ Error reading length of domains file: %v", err)
+			bh.Logger.Log0("❌ Error reading length of domains file: %v", err)
 			continue
 		}
 
@@ -439,13 +510,28 @@ func (bh *BH) ProcessDomain(step int) {
 
 			*originalEntry = ldap.Entry{}
 			if err := info.reader.ReadEntry(originalEntry); err != nil {
-				bh.log("❌ Error decoding domain: %v", err)
+				bh.Logger.Log0("❌ Error decoding domain: %v", err)
 				continue
 			}
 
 			entry.Init(originalEntry)
 
 			domain := builder.BuildDomainFromEntry(&entry, info.trusts)
+
+			// Merge GPO changes if available
+			if bh.RuntimeOptions.GetMergeRemote() && bh.RemoteGPOChangesCollection != nil {
+				normalizedDN := strings.ToUpper(entry.DN)
+				if gpoData, found := bh.RemoteGPOChangesCollection[normalizedDN]; found && !gpoData.GPOChanges.IsEmpty() {
+					// Compute affected computers during conversion
+					// Use pre-built tree of computers for efficiency
+					affectedComps, err := bh.getAffectedComputers(entry.DN, entry.GetDomainFromDN(), bh.computerTrees)
+					if err == nil && len(affectedComps) > 0 {
+						domain.GPOChanges = gpoData.GPOChanges
+						domain.GPOChanges.AffectedComputers = affectedComps
+					}
+				}
+			}
+
 			domainWriter.Add(domain)
 
 			processedCount++
@@ -479,14 +565,14 @@ func (bh *BH) loadTrusts(trustsPath string) []gildap.LDAPEntry {
 
 	mpReader, err := reader.NewMPReader(trustsPath)
 	if err != nil {
-		bh.log("❌ Error opening trusts file: %v", err)
+		bh.Logger.Log0("❌ Error opening trusts file: %v", err)
 		return trusts
 	}
 	defer mpReader.Close()
 
 	_, err = mpReader.ReadLength()
 	if err != nil {
-		bh.log("❌ Error reading length of trusts file: %v", err)
+		bh.Logger.Log0("❌ Error reading length of trusts file: %v", err)
 		return trusts
 	}
 
@@ -500,7 +586,7 @@ func (bh *BH) loadTrusts(trustsPath string) []gildap.LDAPEntry {
 
 		*originalEntry = ldap.Entry{}
 		if err := mpReader.ReadEntry(originalEntry); err != nil {
-			bh.log("❌ Error decoding trust: %v", err)
+			bh.Logger.Log0("❌ Error decoding trust: %v", err)
 			continue
 		}
 
@@ -524,7 +610,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 		ctWriter.Close()
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(ctFileName); err == nil {
-				bh.log("✅ [green]Written %s (%s)[-]", ctFileName, formatFileSize(fileInfo.Size()))
+				bh.Logger.Log0("✅ [green]Written %s (%s)[-]", ctFileName, formatFileSize(fileInfo.Size()))
 			}
 		}
 	}()
@@ -535,7 +621,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 		enterpriseCAWriter.Close()
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(enterpriseCAFileName); err == nil {
-				bh.log("✅ [green]Written %s (%s)[-]", enterpriseCAFileName, formatFileSize(fileInfo.Size()))
+				bh.Logger.Log0("✅ [green]Written %s (%s)[-]", enterpriseCAFileName, formatFileSize(fileInfo.Size()))
 			}
 		}
 	}()
@@ -546,7 +632,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 		aiacaWriter.Close()
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(aiacaFileName); err == nil {
-				bh.log("✅ [green]Written %s (%s)[-]", aiacaFileName, formatFileSize(fileInfo.Size()))
+				bh.Logger.Log0("✅ [green]Written %s (%s)[-]", aiacaFileName, formatFileSize(fileInfo.Size()))
 			}
 		}
 	}()
@@ -557,7 +643,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 		rootCAWriter.Close()
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(rootCAFileName); err == nil {
-				bh.log("✅ [green]Written %s (%s)[-]", rootCAFileName, formatFileSize(fileInfo.Size()))
+				bh.Logger.Log0("✅ [green]Written %s (%s)[-]", rootCAFileName, formatFileSize(fileInfo.Size()))
 			}
 		}
 	}()
@@ -568,7 +654,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 		ntAuthStoresWriter.Close()
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(ntAuthStoresFileName); err == nil {
-				bh.log("✅ [green]Written %s (%s)[-]", ntAuthStoresFileName, formatFileSize(fileInfo.Size()))
+				bh.Logger.Log0("✅ [green]Written %s (%s)[-]", ntAuthStoresFileName, formatFileSize(fileInfo.Size()))
 			}
 		}
 	}()
@@ -579,7 +665,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 		issuancePoliciesWriter.Close()
 		if !bh.IsAborted() {
 			if fileInfo, err := os.Stat(issuancePoliciesFileName); err == nil {
-				bh.log("✅ [green]Written %s (%s)[-]", issuancePoliciesFileName, formatFileSize(fileInfo.Size()))
+				bh.Logger.Log0("✅ [green]Written %s (%s)[-]", issuancePoliciesFileName, formatFileSize(fileInfo.Size()))
 			}
 		}
 	}()
@@ -599,14 +685,14 @@ func (bh *BH) ProcessConfiguration(step int) {
 	for _, configPath := range configPaths {
 		mpReader, err := reader.NewMPReader(configPath)
 		if err != nil {
-			bh.log("❌ Error opening configuration file: %v", err)
+			bh.Logger.Log0("❌ Error opening configuration file: %v", err)
 			continue
 		}
 		defer mpReader.Close()
 
 		totalInFile, err := mpReader.ReadLength()
 		if err != nil {
-			bh.log("❌ Error reading length of configuration file: %v", err)
+			bh.Logger.Log0("❌ Error reading length of configuration file: %v", err)
 			continue
 		}
 		totalInFiles += totalInFile
@@ -635,7 +721,7 @@ func (bh *BH) ProcessConfiguration(step int) {
 
 			*originalEntry = ldap.Entry{}
 			if err := mpReader.ReadEntry(originalEntry); err != nil {
-				bh.log("❌ Error decoding configuration entry: %v", err)
+				bh.Logger.Log0("❌ Error decoding configuration entry: %v", err)
 				continue
 			}
 
@@ -700,7 +786,13 @@ func (bh *BH) processConfigurationEntry(entry *gildap.LDAPEntry) {
 			// if present
 			if bh.RuntimeOptions.GetMergeRemote() && bh.RemoteEnterpriseCACollection != nil {
 				if remoteData, found := bh.RemoteEnterpriseCACollection[enterpriseCA.ObjectIdentifier]; found {
-					mergeRemoteEnterpriseCACollection(enterpriseCA, remoteData)
+					enterpriseCA.CARegistryData = remoteData.CARegistryData
+					enterpriseCA.HttpEnrollmentEndpoints = remoteData.HttpEnrollmentEndpoints
+					enterpriseCA.HostingComputer = remoteData.HostingComputer
+					enterpriseCA.Properties.EnrollmentAgentRestrictionsCollected = remoteData.CARegistryData.EnrollmentAgentRestrictions.Collected
+					enterpriseCA.Properties.IsUserSpecifiesSanEnabledCollected = remoteData.CARegistryData.IsUserSpecifiesSanEnabled.Collected
+					enterpriseCA.Properties.RoleSeparationEnabledCollected = remoteData.CARegistryData.IsRoleSeparationEnabled.Collected
+					enterpriseCA.Properties.CASecurityCollected = remoteData.CARegistryData.CASecurity.Collected
 				}
 			}
 			if writer, _ := bh.GetCurrentWriter("enterprisecas"); writer != nil {
@@ -784,14 +876,14 @@ func (bh *BH) LoadSchemaInfo(step int) {
 	for _, schemaPath := range schemaPaths {
 		mpReader, err := reader.NewMPReader(schemaPath)
 		if err != nil {
-			bh.log("❌ Error opening schema file: %v", err)
+			bh.Logger.Log0("❌ Error opening schema file: %v", err)
 			continue
 		}
 		defer mpReader.Close()
 
 		totalInFile, err := mpReader.ReadLength()
 		if err != nil {
-			bh.log("❌ Error reading length of schema file: %v", err)
+			bh.Logger.Log0("❌ Error reading length of schema file: %v", err)
 			continue
 		}
 		totalInFiles += totalInFile
@@ -819,7 +911,7 @@ func (bh *BH) LoadSchemaInfo(step int) {
 
 			*originalEntry = ldap.Entry{}
 			if err := mpReader.ReadEntry(originalEntry); err != nil {
-				bh.log("❌ Error decoding schema entry: %v", err)
+				bh.Logger.Log0("❌ Error decoding schema entry: %v", err)
 				continue
 			}
 
@@ -859,9 +951,124 @@ func (bh *BH) LoadSchemaInfo(step int) {
 	}
 }
 
-// PerformConversion transforms LDAP data to BloodHound JSON format with progress tracking.
-const TotalConversionSteps = 11
+func (bh *BH) LoadRemoteResults(step int) {
+	startTime := time.Now()
+	lastUpdateTime := startTime
+	lastCount := 0
 
+	if bh.ConversionUpdates != nil {
+		bh.ConversionUpdates <- core.ConversionUpdate{
+			Step:      step,
+			Processed: 0,
+			Total:     4,
+			Percent:   0.0,
+			Status:    "running",
+		}
+	}
+
+	bh.Logger.Log1("📦 Loading Enterprise CA collection results...")
+	bh.RemoteEnterpriseCACollection = bh.loadRemoteCAResults()
+	if len(bh.RemoteEnterpriseCACollection) > 0 {
+		bh.Logger.Log1("✅ Loaded remote collection data for %s Enterprise CAs", strconv.Itoa(len(bh.RemoteEnterpriseCACollection)))
+	} else {
+		bh.Logger.Log1("🫠 [yellow]No remote Enterprise CA collection data found.[-]")
+	}
+	if bh.ConversionUpdates != nil {
+		elapsed := time.Since(startTime)
+		metrics := calculateProgressMetrics(1, 4, startTime, &lastUpdateTime, &lastCount)
+		bh.ConversionUpdates <- core.ConversionUpdate{
+			Step:      step,
+			Processed: 1,
+			Total:     4,
+			Percent:   25.0,
+			Speed:     metrics.speedText,
+			AvgSpeed:  metrics.avgSpeedText,
+			ETA:       metrics.etaText,
+			Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+		}
+	}
+
+	bh.Logger.Log1("📦 Loading GPOLocalGroup collection results...")
+	bh.RemoteGPOChangesCollection = bh.loadRemoteGPOChanges()
+	if len(bh.RemoteGPOChangesCollection) > 0 {
+		bh.Logger.Log1("✅ Loaded GPO changes for %d OUs/Domains", len(bh.RemoteGPOChangesCollection))
+	} else {
+		bh.Logger.Log1("🫠 [yellow]No remote GPO changes collection data found.[-]")
+	}
+	if bh.ConversionUpdates != nil {
+		elapsed := time.Since(startTime)
+		metrics := calculateProgressMetrics(2, 4, startTime, &lastUpdateTime, &lastCount)
+		bh.ConversionUpdates <- core.ConversionUpdate{
+			Step:      step,
+			Processed: 2,
+			Total:     4,
+			Percent:   50.0,
+			Speed:     metrics.speedText,
+			AvgSpeed:  metrics.avgSpeedText,
+			ETA:       metrics.etaText,
+			Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+		}
+	}
+
+	if bh.RemoteGPOChangesCollection != nil && len(bh.RemoteGPOChangesCollection) > 0 {
+		bh.Logger.Log1("📦 Building OU tree cache for AffectedComputers computation...")
+		bh.computerTrees = bh.buildOUTrees()
+		if len(bh.computerTrees) > 0 {
+			bh.Logger.Log1("✅ Built OU tree cache for %d domains", len(bh.computerTrees))
+		} else {
+			bh.Logger.Log1("🫠 [yellow]No OU trees built for AffectedComputers computation.[-]")
+		}
+	}
+	if bh.ConversionUpdates != nil {
+		elapsed := time.Since(startTime)
+		metrics := calculateProgressMetrics(3, 4, startTime, &lastUpdateTime, &lastCount)
+		bh.ConversionUpdates <- core.ConversionUpdate{
+			Step:      step,
+			Processed: 3,
+			Total:     4,
+			Percent:   75.0,
+			Speed:     metrics.speedText,
+			AvgSpeed:  metrics.avgSpeedText,
+			ETA:       metrics.etaText,
+			Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+		}
+	}
+
+	bh.Logger.Log1("📦 Loading Computer collection results...")
+	bh.RemoteComputerCollection = bh.loadRemoteComputerResults()
+	if len(bh.RemoteComputerCollection) > 0 {
+		bh.Logger.Log1("✅ Loaded remote collection data for %s Computers", strconv.Itoa(len(bh.RemoteComputerCollection)))
+	} else {
+		bh.Logger.Log1("🫠 [yellow]No remote Computer collection data found.[-]")
+	}
+	if bh.ConversionUpdates != nil {
+		elapsed := time.Since(startTime)
+		metrics := calculateProgressMetrics(4, 4, startTime, &lastUpdateTime, &lastCount)
+		bh.ConversionUpdates <- core.ConversionUpdate{
+			Step:      step,
+			Processed: 4,
+			Total:     4,
+			Percent:   100.0,
+			Speed:     metrics.speedText,
+			AvgSpeed:  metrics.avgSpeedText,
+			ETA:       metrics.etaText,
+			Elapsed:   elapsed.Round(10 * time.Millisecond).String(),
+		}
+	}
+}
+
+// getTotalConversionSteps returns the number of conversion steps
+func (bh *BH) getTotalConversionSteps() int {
+	baseSteps := 11
+
+	if bh.RuntimeOptions.GetCompressOutput() {
+		baseSteps++
+	}
+
+	return baseSteps
+}
+
+// PerformConversion transforms LDAP data to BloodHound JSON format with progress tracking.
 func (bh *BH) PerformConversion() {
 	// Update timestamp for this conversion run
 	bh.Timestamp = time.Now().Format("20060102150405")
@@ -875,7 +1082,7 @@ func (bh *BH) PerformConversion() {
 				abortLogged = true
 			}
 			// Mark remaining steps as skipped
-			for step := currentStep + 1; step <= TotalConversionSteps; step++ {
+			for step := currentStep + 1; step <= bh.getTotalConversionSteps(); step++ {
 				if bh.ConversionUpdates != nil {
 					bh.ConversionUpdates <- ConversionUpdate{
 						Step:   step,
@@ -888,88 +1095,96 @@ func (bh *BH) PerformConversion() {
 		return false
 	}
 
-	if notifyAbort(0) {
-		return
-	}
-
 	// Initialize builder state
 	forestMapPath := filepath.Join(bh.LdapFolder, "ForestDomains.json")
 	builder.BState().Init(forestMapPath)
 
-	if notifyAbort(0) {
+	// Load caches for conversion
+	currentStep := 1
+	bh.runConversionStep(currentStep, bh.loadConversionCache)
+	if notifyAbort(currentStep) {
 		return
 	}
 
 	// Load remote collection results if available
-	bh.RemoteComputerCollection = bh.loadRemoteComputerResults()
-	bh.RemoteEnterpriseCACollection = bh.loadRemoteCAResults()
-
-	// Load cache and schema (rows 1-2)
-	bh.runConversionStep(1, func() { bh.loadConversionCache(1) })
-	if notifyAbort(1) {
-		return
-	}
-	bh.runConversionStep(2, func() { bh.LoadSchemaInfo(2) })
-	if notifyAbort(2) {
+	currentStep++
+	bh.runConversionStep(currentStep, bh.LoadRemoteResults)
+	if notifyAbort(currentStep) {
 		return
 	}
 
-	// Process domains and configuration (rows 3-4)
-	bh.runConversionStep(3, func() { bh.ProcessDomain(3) })
-	if notifyAbort(3) {
+	currentStep++
+	bh.runConversionStep(currentStep, bh.LoadSchemaInfo)
+	if notifyAbort(currentStep) {
 		return
 	}
 
-	bh.runConversionStep(4, func() { bh.ProcessConfiguration(4) })
-	if notifyAbort(4) {
+	// Process domains and configuration
+	currentStep++
+	bh.runConversionStep(currentStep, bh.ProcessDomain)
+	if notifyAbort(currentStep) {
 		return
 	}
 
-	// Process all object types (rows 5-10)
+	currentStep++
+	bh.runConversionStep(currentStep, bh.ProcessConfiguration)
+	if notifyAbort(currentStep) {
+		return
+	}
+
+	// Process all object types
+	currentStep++
 	gposPaths, _ := bh.GetPaths("gpos")
-	bh.runConversionStep(5, func() { bh.ProcessObjects(gposPaths, "gpos", 5) })
-	if notifyAbort(5) {
+	bh.runConversionStep(currentStep, func(row int) { bh.ProcessObjects(gposPaths, "gpos", row) })
+	if notifyAbort(currentStep) {
 		return
 	}
 
+	currentStep++
 	ousPaths, _ := bh.GetPaths("ous")
-	bh.runConversionStep(6, func() { bh.ProcessObjects(ousPaths, "ous", 6) })
-	if notifyAbort(6) {
+	bh.runConversionStep(currentStep, func(row int) { bh.ProcessObjects(ousPaths, "ous", row) })
+	if notifyAbort(currentStep) {
 		return
 	}
 
+	currentStep++
 	containersPaths, _ := bh.GetPaths("containers")
-	bh.runConversionStep(7, func() { bh.ProcessObjects(containersPaths, "containers", 7) })
-	if notifyAbort(7) {
+	bh.runConversionStep(currentStep, func(row int) { bh.ProcessObjects(containersPaths, "containers", row) })
+	if notifyAbort(currentStep) {
 		return
 	}
 
+	currentStep++
 	groupsPaths, _ := bh.GetPaths("groups")
-	bh.runConversionStep(8, func() { bh.ProcessObjects(groupsPaths, "groups", 8) })
-	if notifyAbort(8) {
+	bh.runConversionStep(currentStep, func(row int) { bh.ProcessObjects(groupsPaths, "groups", row) })
+	if notifyAbort(currentStep) {
 		return
 	}
 
+	currentStep++
 	computersPaths, _ := bh.GetPaths("computers")
-	bh.runConversionStep(9, func() { bh.ProcessObjects(computersPaths, "computers", 9) })
-	if notifyAbort(9) {
+	bh.runConversionStep(currentStep, func(row int) { bh.ProcessObjects(computersPaths, "computers", row) })
+	if notifyAbort(currentStep) {
 		return
 	}
 
+	currentStep++
 	usersPaths, _ := bh.GetPaths("users")
-	bh.runConversionStep(10, func() { bh.ProcessObjects(usersPaths, "users", 10) })
-	if notifyAbort(10) {
+	bh.runConversionStep(currentStep, func(row int) { bh.ProcessObjects(usersPaths, "users", row) })
+	if notifyAbort(currentStep) {
 		return
 	}
 
-	// Compress output if enabled (row 11)
+	// Compress output if enabled
 	if bh.RuntimeOptions.GetCompressOutput() {
-		bh.runConversionStep(11, func() { bh.compressBloodhoundOutput(11) })
+		currentStep++
+		bh.runConversionStep(currentStep, bh.compressBloodhoundOutput)
 	}
 
 	// Clear remote collection maps
 	bh.RemoteComputerCollection = nil
 	bh.RemoteEnterpriseCACollection = nil
+	bh.RemoteGPOChangesCollection = nil
 
 	// Clear writers map
 	bh.writers = nil
@@ -978,12 +1193,12 @@ func (bh *BH) PerformConversion() {
 	runtime.GC()
 
 	if builder.BState().EmptySDCount > 0 {
-		bh.log("🫠 [yellow]Security descriptors were not present in %d entries. Permissions issue during ingestion?[-]", builder.BState().EmptySDCount)
+		bh.Logger.Log0("🫠 [yellow]Security descriptors were not present in %d entries. Permissions issue during ingestion?[-]", builder.BState().EmptySDCount)
 	}
 }
 
 // runConversionStep runs a conversion step and sends progress events
-func (bh *BH) runConversionStep(row int, stepFunc func()) {
+func (bh *BH) runConversionStep(row int, stepFunc func(row int)) {
 	if bh.IsAborted() {
 		return
 	}
@@ -996,7 +1211,7 @@ func (bh *BH) runConversionStep(row int, stepFunc func()) {
 	}
 
 	startTime := time.Now()
-	stepFunc()
+	stepFunc(row)
 	elapsed := time.Since(startTime)
 
 	if bh.IsAborted() {
@@ -1048,19 +1263,19 @@ func (bh *BH) loadConversionCache(step int) {
 		for _, filePath := range filePaths {
 			// Check if this cache has already been loaded
 			if builder.BState().IsCacheLoaded(filePath) {
-				bh.logVerbose("🦘 Skipped %s (already loaded)", filePath)
+				bh.Logger.Log1("🦘 Skipped %s (already loaded)", filePath)
 				continue
 			}
 
 			r, err := reader.NewMPReader(filePath)
 			if err != nil {
-				bh.log("❌ Error opening file %s: %v", filePath, err)
+				bh.Logger.Log0("❌ Error opening file %s: %v", filePath, err)
 				continue
 			}
 
 			numEntries, err := r.ReadLength()
 			if err != nil {
-				bh.log("❌ Error reading length of %s: %v", filePath, err)
+				bh.Logger.Log0("❌ Error reading length of %s: %v", filePath, err)
 				r.Close()
 				continue
 			}
@@ -1145,14 +1360,14 @@ func (bh *BH) loadConversionCache(step int) {
 		}
 
 		filePath := info.reader.GetPath()
-		bh.logVerbose("📦 Loading %s", filePath)
+		bh.Logger.Log1("📦 Loading %s", filePath)
 
 		builder.BState().CacheEntries(info.reader, info.identifier, bh.Logger, bh.IsAborted, progressCallback)
 
 		// Mark this cache as loaded
 		builder.BState().MarkCacheLoaded(filePath)
 
-		bh.logVerbose("✅ %s loaded", filePath)
+		bh.Logger.Log1("✅ %s loaded", filePath)
 	}
 }
 
@@ -1171,7 +1386,7 @@ func (bh *BH) compressBloodhoundOutput(step int) {
 	}
 
 	if len(filesToCompress) == 0 {
-		bh.log("🫠 [yellow]No JSON files found to compress[-]")
+		bh.Logger.Log0("🫠 [yellow]No JSON files found to compress[-]")
 		return
 	}
 
@@ -1179,7 +1394,7 @@ func (bh *BH) compressBloodhoundOutput(step int) {
 	zipPath := filepath.Join(bh.OutputFolder, bh.Timestamp+"_BloodHound.zip")
 	zipFile, err := os.Create(zipPath)
 	if err != nil {
-		bh.log("❌ Error creating zip file: %v", err)
+		bh.Logger.Log0("❌ Error creating zip file: %v", err)
 		return
 	}
 	defer zipFile.Close()
@@ -1210,7 +1425,7 @@ func (bh *BH) compressBloodhoundOutput(step int) {
 		}
 
 		if err := bh.addFileToZip(zipWriter, file); err != nil {
-			bh.log("❌ Error adding file to zip: %v", err)
+			bh.Logger.Log0("❌ Error adding file to zip: %v", err)
 			return
 		}
 
@@ -1236,25 +1451,25 @@ func (bh *BH) compressBloodhoundOutput(step int) {
 
 	// Close the zip writer before getting file size
 	if err := zipWriter.Close(); err != nil {
-		bh.log("❌ Error finalizing zip: %v", err)
+		bh.Logger.Log0("❌ Error finalizing zip: %v", err)
 		return
 	}
 
 	// Get zip file size
 	if fileInfo, err := os.Stat(zipPath); err == nil {
-		bh.log("✅ [green]BloodHound dump: \"%s\" (%s)[-]", zipPath, formatFileSize(fileInfo.Size()))
+		bh.Logger.Log0("✅ [green]BloodHound dump: \"%s\" (%s)[-]", zipPath, formatFileSize(fileInfo.Size()))
 	} else {
-		bh.log("🫠 [yellow]Problem saving \"%s\": %v[-]", zipPath, err)
+		bh.Logger.Log0("🫠 [yellow]Problem saving \"%s\": %v[-]", zipPath, err)
 	}
 
 	// Cleanup original files if enabled
 	if bh.RuntimeOptions.GetCleanupAfterCompression() {
 		for _, file := range filesToCompress {
 			if err := os.Remove(file); err != nil {
-				bh.log("🫠 [yellow]Could not remove \"%s\":[-] %v", filepath.Base(file), err)
+				bh.Logger.Log0("🫠 [yellow]Could not remove \"%s\":[-] %v", filepath.Base(file), err)
 			}
 		}
-		bh.log("🧹 Cleaned up %d original JSON files from \"%s\"", len(filesToCompress), bh.OutputFolder)
+		bh.Logger.Log0("🧹 Cleaned up %d original JSON files from \"%s\"", len(filesToCompress), bh.OutputFolder)
 	}
 }
 
@@ -1276,4 +1491,36 @@ func (bh *BH) addFileToZip(zipWriter *zip.Writer, filePath string) error {
 	// Copy file contents to zip
 	_, err = io.Copy(writer, file)
 	return err
+}
+
+func (bh *BH) buildOUTrees() map[string]*OUTreeNode {
+	computersByDomain := builder.BState().GetCachedComputerDNMap()
+	computerTrees := buildOUTreeFromComputers(computersByDomain)
+	return computerTrees
+}
+
+func (bh *BH) getAffectedComputers(targetDn, domain string, computerTrees map[string]*OUTreeNode) ([]builder.TypedPrincipal, error) {
+	// Lookup computers - if DN is a domain (starts with DC=), get all computers directly
+	affectedComputers := []builder.TypedPrincipal{}
+	upperDN := strings.ToUpper(targetDn)
+	if strings.HasPrefix(upperDN, "DC=") {
+		// Domain-level GPO: get all computers for that domain from the cache
+		if computers := builder.BState().GetCachedComputerDNMap()[domain]; len(computers) > 0 {
+			for _, sid := range computers {
+				affectedComputers = append(affectedComputers, builder.TypedPrincipal{
+					ObjectIdentifier: sid,
+					ObjectType:       "Computer",
+				})
+			}
+		}
+	} else {
+		// OU-level GPO: use tree structure for efficient lookup
+		if rootNode, ok := computerTrees[domain]; ok {
+			if node, found := findNodeInTree(rootNode, upperDN); found {
+				affectedComputers = node.GetAllComputersInSubtree()
+			}
+		}
+	}
+
+	return affectedComputers, nil
 }

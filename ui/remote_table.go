@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 
+	"github.com/Macmod/flashingestor/config"
 	"github.com/rivo/tview"
 )
 
@@ -12,77 +13,49 @@ func (app *Application) GetRemoteCollectTable() *tview.Table {
 }
 
 // SetupRemoteCollectionTable initializes the remote collection table
-func (app *Application) SetupRemoteCollectionTable() {
+func (app *Application) SetupRemoteCollectionTable(runtimeOptions *config.RuntimeOptions) {
+	// Set headers
 	headers := []string{"Status", "Step", "Progress", "Percent", "Speed", "AvgSpeed", "Success", "ETA", "Elapsed"}
 	for i, header := range headers {
 		app.remoteCollectPage.SetCell(0, i, tview.NewTableCell(fmt.Sprintf("[blue]%s", header)).
 			SetSelectable(false))
 	}
 
+	// Define steps in order: Cache -> GPOLocalGroups (optional) -> RemoteEnterpriseCAs (optional) -> Computer steps (optional)
+	steps := []string{"Cache Load"}
+
+	if runtimeOptions != nil && runtimeOptions.IsMethodEnabled("gpolocalgroup") {
+		steps = append(steps, "GPOLocalGroups")
+	}
+
+	if runtimeOptions != nil && runtimeOptions.IsAnyCAMethodEnabled() {
+		steps = append(steps, "RemoteEnterpriseCAs")
+	}
+
+	// Add computer collection steps if any computer methods are enabled
+	if runtimeOptions != nil && runtimeOptions.IsAnyComputerMethodEnabled() {
+		steps = append(steps, []string{
+			"Load Computers",
+			"Status Checks",
+			"RemoteComputers",
+		}...)
+	}
+
 	// Setup rows for each step
-	app.remoteCollectPage.SetCell(1, 0, tview.NewTableCell("[yellow]Pending"))
-	app.remoteCollectPage.SetCell(1, 1, tview.NewTableCell("Cache Load"))
-	app.remoteCollectPage.SetCell(1, 2, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(1, 3, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(1, 4, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(1, 5, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(1, 6, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(1, 7, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(1, 8, tview.NewTableCell("-"))
-
-	app.remoteCollectPage.SetCell(2, 0, tview.NewTableCell("[yellow]Pending"))
-	app.remoteCollectPage.SetCell(2, 1, tview.NewTableCell("Load Computers"))
-	app.remoteCollectPage.SetCell(2, 2, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(2, 3, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(2, 4, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(2, 5, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(2, 6, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(2, 7, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(2, 8, tview.NewTableCell("-"))
-
-	app.remoteCollectPage.SetCell(3, 0, tview.NewTableCell("[yellow]Pending"))
-	app.remoteCollectPage.SetCell(3, 1, tview.NewTableCell("Status Checks"))
-	app.remoteCollectPage.SetCell(3, 2, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(3, 3, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(3, 4, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(3, 5, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(3, 6, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(3, 7, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(3, 8, tview.NewTableCell("-"))
-
-	app.remoteCollectPage.SetCell(4, 0, tview.NewTableCell("[yellow]Pending"))
-	app.remoteCollectPage.SetCell(4, 1, tview.NewTableCell("DNS Lookups"))
-	app.remoteCollectPage.SetCell(4, 2, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(4, 3, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(4, 4, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(4, 5, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(4, 6, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(4, 7, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(4, 8, tview.NewTableCell("-"))
-
-	app.remoteCollectPage.SetCell(5, 0, tview.NewTableCell("[yellow]Pending"))
-	app.remoteCollectPage.SetCell(5, 1, tview.NewTableCell("RemoteEnterpriseCAs"))
-	app.remoteCollectPage.SetCell(5, 2, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(5, 3, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(5, 4, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(5, 5, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(5, 6, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(5, 7, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(5, 8, tview.NewTableCell("-"))
-
-	app.remoteCollectPage.SetCell(6, 0, tview.NewTableCell("[yellow]Pending"))
-	app.remoteCollectPage.SetCell(6, 1, tview.NewTableCell("RemoteComputers"))
-	app.remoteCollectPage.SetCell(6, 2, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(6, 3, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(6, 4, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(6, 5, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(6, 6, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(6, 7, tview.NewTableCell("-"))
-	app.remoteCollectPage.SetCell(6, 8, tview.NewTableCell("-"))
+	for row, stepName := range steps {
+		rowNum := row + 1 // Row 0 is headers
+		app.remoteCollectPage.SetCell(rowNum, 0, tview.NewTableCell("[yellow]Pending"))
+		app.remoteCollectPage.SetCell(rowNum, 1, tview.NewTableCell(stepName))
+		for col := 2; col < len(headers); col++ {
+			app.remoteCollectPage.SetCell(rowNum, col, tview.NewTableCell("-"))
+		}
+	}
 }
 
 // UpdateRemoteCollectionRow updates a specific step in the remote collection table
-// row: 1=Cache Loading, 2=Load Computers, 3=Availability Checks, 4=DNS Lookups, 5=Remote Collection (CAs), 6=Remote Collection (Computers)
+// Steps are dynamically numbered based on enabled methods:
+// - Always: Cache Load, Load Computers, Status Checks, RemoteComputers
+// - Conditional: GPOLocalGroups (step 2 if enabled), RemoteEnterpriseCAs (before RemoteComputers if CA methods enabled)
 // Columns: 0=Status, 1=Step, 2=Processed, 3=Percent, 4=Speed, 5=Avg Speed, 6=Success, 7=ETA, 8=Elapsed
 func (app *Application) UpdateRemoteCollectionRow(row int, status, processed, percent, speed, avgSpeed, success, eta, elapsed string) {
 	// Called from background goroutines, use QueueUpdate to modify cells

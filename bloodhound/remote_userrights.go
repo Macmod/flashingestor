@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
-	"github.com/Macmod/flashingestor/msrpc"
 	lsat "github.com/oiweiwei/go-msrpc/msrpc/lsat/lsarpc/v0"
 )
 
@@ -17,9 +16,8 @@ func getRID(sid string) string {
 }
 
 // collectUserRights retrieves user rights assignments from a target system via LSA RPC
-func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp string, targetHost string, computerObjectId string, isDC bool, domain string) []builder.UserRightsAPIResult {
-	rpcObj, err := msrpc.NewLsadRPC(ctx, targetIp, rc.auth)
-
+func (rc *RemoteCollector) collectUserRights(ctx context.Context, computerObjectId string, isDC bool, domain string, rpcMgr *RPCManager) []builder.UserRightsAPIResult {
+	rpcObj, err := rpcMgr.GetOrCreateLsadRPC(ctx)
 	if err != nil {
 		errStr := fmt.Sprint(err)
 		result := builder.UserRightsAPIResult{
@@ -28,7 +26,14 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 		return []builder.UserRightsAPIResult{result}
 	}
 
-	defer rpcObj.Close()
+	lsatObj, err := rpcMgr.GetOrCreateLsatRPC(ctx)
+	if err != nil {
+		errStr := fmt.Sprint(err)
+		result := builder.UserRightsAPIResult{
+			APIResult: builder.APIResult{Collected: false, FailureReason: &errStr},
+		}
+		return []builder.UserRightsAPIResult{result}
+	}
 
 	desiredPrivileges := []string{
 		"SeRemoteInteractiveLogonRight",
@@ -43,12 +48,10 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 		return []builder.UserRightsAPIResult{result}
 	}
 
-	machineSid, _ := getMachineSID(ctx, rc.auth, targetIp, computerObjectId)
+	targetHost := rpcMgr.GetTargetHost()
+	machineSid, _ := getMachineSID(ctx, rpcMgr, computerObjectId)
 
 	results := []builder.UserRightsAPIResult{}
-
-	// Lazy-initialize RPC object only when needed, reuse for all lookups across all privileges
-	var lsatObj *msrpc.LsatRPC
 
 	for privilege, principals := range userRights {
 		result := builder.UserRightsAPIResult{
@@ -97,14 +100,10 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 			}
 
 			if machineSid != "" && strings.HasPrefix(principalSid, machineSid+"-") {
-				// Create RPC connection on first use
+				// Skip local SID resolution if no client available
+				// Should not happen usually
 				if lsatObj == nil {
-					var err error
-					lsatObj, err = msrpc.NewLsatRPC(ctx, targetIp, rc.auth)
-					if err != nil {
-						// Failed to create RPC connection, skip all local SID lookups
-						continue
-					}
+					continue
 				}
 
 				newSid := fmt.Sprintf("%s-%s", machineSid, getRID(principalSid))
@@ -152,11 +151,6 @@ func (rc *RemoteCollector) collectUserRights(ctx context.Context, targetIp strin
 		}
 
 		results = append(results, result)
-	}
-
-	// Close RPC connection if it was created
-	if lsatObj != nil {
-		lsatObj.Close()
 	}
 
 	return results

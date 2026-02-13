@@ -132,7 +132,7 @@ func (app *Application) SetRunning(running bool, operationName string) {
 			// Build root flex
 			app.rootFlex = tview.NewFlex().SetDirection(tview.FlexRow).
 				AddItem(app.statusPanel, 3, 0, false).
-				AddItem(app.progressTracker, 15, 0, false).
+				AddItem(app.progressTracker, 16, 0, false).
 				AddItem(app.logPanel, 0, 1, false)
 
 			app.rootFlex.SetTitle("FlashIngestor").
@@ -144,7 +144,7 @@ func (app *Application) SetRunning(running bool, operationName string) {
 			// Rebuild root flex with button panel
 			app.rootFlex = tview.NewFlex().SetDirection(tview.FlexRow).
 				AddItem(app.buttonPanel, 3, 0, false).
-				AddItem(app.progressTracker, 15, 0, false).
+				AddItem(app.progressTracker, 16, 0, false).
 				AddItem(app.logPanel, 0, 1, false)
 
 			app.rootFlex.SetTitle("FlashIngestor").

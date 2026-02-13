@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -48,7 +47,7 @@ type IngestionManager struct {
 	queryDefs           []config.QueryDefinition
 	ldapAuthOptions     *ldapauth.Options
 	auth                *config.CredentialMgr
-	resolver            *net.Resolver
+	resolver            *config.CustomResolver
 	ldapFolder          string
 	logger              *core.Logger
 	uiApp               *ui.Application

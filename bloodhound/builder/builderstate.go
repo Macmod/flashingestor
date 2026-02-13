@@ -25,26 +25,34 @@ const (
 // State maintains global caches and mappings during BloodHound data construction.
 // This is a singleton accessed via BState().
 type State struct {
-	DomainControllers      map[string][]TypedPrincipal // Domain SID → DCs in that domain
-	domainControllersMu    sync.RWMutex                // Protects DomainControllers map writes
-	AttrGUIDMap            sync.Map                    // Schema attribute name → GUID mappings
-	DomainSIDCache         *SimpleCache                // Domain name → SID
-	SIDDomainCache         *SimpleCache                // SID → domain name
-	NetBIOSDomainCache     *SimpleCache                // NetBIOS name → DNS domain name
-	MemberCache            *StringCache                // DN → Entry
-	SIDCache               *StringCache                // SID → Entry
-	HostDnsCache           *StringCache                // domain+hostname → Computer Entry
-	SamCache               *StringCache                // domain+sAMAccountName → Entry
-	MachineSIDCache        *StringCache                // Object SID → Entry with MachineSID
-	ChildCache             *ParentChildCache           // Parent DN → Child Entries
-	AdminSDHolderHashCache sync.Map                    // Domain → AdminSDHolder ACL hash
-	CertTemplateCache      *StringCache                // domain+template CN/OID → Cert Template Entry
-	GPOCache               *GPOCache                   // DN → GPO metadata (for GPO local group processing)
-	WellKnown              *WellKnownSIDTracker        // Seen well-known SIDs (S-1-5-32-*, etc)
-	CacheWaitGroup         sync.WaitGroup              // Waitgroup for cache loading
-	EmptySDCount           int                         // # of entries with empty security descriptors
-	loadedCaches           map[string]bool             // Tracks which msgpack files have been loaded
-	domainToForestMap      sync.Map                    // Domain → forest root mapping
+	DomainControllers      map[string][]TypedPrincipal  // Domain SID → DCs in that domain
+	domainControllersMu    sync.RWMutex                 // Protects DomainControllers map writes
+	AttrGUIDMap            sync.Map                     // Schema attribute name → GUID mappings
+	DomainSIDCache         *SimpleCache                 // Domain name → SID
+	SIDDomainCache         *SimpleCache                 // SID → domain name
+	NetBIOSDomainCache     *SimpleCache                 // NetBIOS name → DNS domain name
+	MemberCache            *StringCache                 // DN → Entry
+	SIDCache               *StringCache                 // SID → Entry
+	HostDnsCache           *StringCache                 // domain+hostname → Computer Entry
+	SamCache               *StringCache                 // domain+sAMAccountName → Entry
+	MachineSIDCache        *StringCache                 // Object SID → Entry with MachineSID
+	ChildCache             *ParentChildCache            // Parent DN → Child Entries
+	AdminSDHolderHashCache sync.Map                     // Domain → AdminSDHolder ACL hash
+	CertTemplateCache      *StringCache                 // domain+template CN/OID → Cert Template Entry
+	GPOCache               *GPOCache                    // DN → GPO metadata (for GPO local group processing)
+	WellKnown              *WellKnownSIDTracker         // Seen well-known SIDs (S-1-5-32-*, etc)
+	CacheWaitGroup         sync.WaitGroup               // Waitgroup for cache loading
+	EmptySDCount           int                          // # of entries with empty security descriptors
+	loadedCaches           map[string]bool              // Tracks which msgpack files have been loaded
+	domainToForestMap      sync.Map                     // Domain → forest root mapping
+	gpLinksCache           map[string]GPLinkEntry       // Cached gPLink+objectType for GPO collection (domains+OUs), keyed by DN
+	computerDNMap          map[string]map[string]string // Cached computer SID by domain for GPO collection, keyed by domain -> DN
+}
+
+// GPLinkEntry stores gPLink and object type for domains/OUs
+type GPLinkEntry struct {
+	GPLink     string
+	ObjectType string // "domain" or "ou"
 }
 
 var bState *State
@@ -160,6 +168,14 @@ func (st *State) Init(forestMapPath string) {
 	if st.loadedCaches == nil {
 		st.loadedCaches = make(map[string]bool)
 	}
+
+	if st.gpLinksCache == nil {
+		st.gpLinksCache = make(map[string]GPLinkEntry)
+	}
+
+	if st.computerDNMap == nil {
+		st.computerDNMap = make(map[string]map[string]string)
+	}
 }
 
 // IsCacheLoaded checks if a msgpack file has already been loaded into caches.
@@ -172,6 +188,16 @@ func (st *State) IsCacheLoaded(fileName string) bool {
 // MarkCacheLoaded records that a msgpack file has been processed.
 func (st *State) MarkCacheLoaded(fileName string) {
 	st.loadedCaches[fileName] = true
+}
+
+// GetCachedGPLinks returns gPLink entries stored for GPO collection (domains and OUs), keyed by DN
+func (st *State) GetCachedGPLinks() map[string]GPLinkEntry {
+	return st.gpLinksCache
+}
+
+// GetCachedComputerDNMap returns computer SID map stored for GPO collection, keyed by domain then DN
+func (st *State) GetCachedComputerDNMap() map[string]map[string]string {
+	return st.computerDNMap
 }
 
 // CacheEntries reads LDAP entries from a msgpack file and populates multiple caches
@@ -233,6 +259,29 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, logger
 
 		sAMAccountName := entry.GetAttrVal("sAMAccountName", "")
 
+		if identifier == "domains" || identifier == "ous" {
+			// For GPOLocalGroup processing
+			gpLink := entry.GetAttrVal("gPLink", "")
+
+			// Skip entries without gPLink - they won't have GPO changes anyway
+			// This deviates from the official implementation which always
+			// fills AffectedComputers, but should be more lightweight
+			if gpLink != "" {
+				// Convert plural identifier to singular objectType
+				objectType := identifier
+				if identifier == "domains" {
+					objectType = "domain"
+				} else if identifier == "ous" {
+					objectType = "ou"
+				}
+
+				st.gpLinksCache[originalEntry.DN] = GPLinkEntry{
+					GPLink:     gpLink,
+					ObjectType: objectType,
+				}
+			}
+		}
+
 		if identifier == "computers" {
 			dnsHostname := entry.GetAttrVal("dNSHostName", "")
 			if dnsHostname != "" {
@@ -252,6 +301,17 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, logger
 					})
 					st.domainControllersMu.Unlock()
 				}
+			}
+
+			// For GPOLocalGroup processing
+			sid := entry.GetSID()
+			domainName := entry.GetDomainFromDN()
+			if sid != "" && domainName != "" {
+				if st.computerDNMap[domainName] == nil {
+					st.computerDNMap[domainName] = make(map[string]string)
+				}
+				dn := strings.ToUpper(entry.DN)
+				st.computerDNMap[domainName][dn] = sid
 			}
 		} else if identifier == "domains" {
 			domainSID := entry.GetSID()
@@ -315,6 +375,19 @@ func (st *State) CacheEntries(reader *reader.MPReader, identifier string, logger
 					}
 				}
 			}
+		} else if identifier == "gpos" {
+			// For GPOLocalGroup processing
+			gpcFileSysPath := entry.GetAttrVal("gPCFileSysPath", "")
+			flags := entry.GetAttrVal("flags", "")
+
+			if gpcFileSysPath != "" {
+				st.GPOCache.Set(originalEntry.DN, &GPOCacheEntry{
+					Name:    entry.GetAttrVal("displayName", ""),
+					GUID:    entry.GetGUID(),
+					GPOPath: gpcFileSysPath,
+					Flags:   flags,
+				})
+			}
 		}
 
 		// sAMAccountName lookups are used extensively for user/computer/group resolution
@@ -348,6 +421,9 @@ func (st *State) Clear() {
 	st.CertTemplateCache = NewCache(ShardNumSmall)
 	st.GPOCache = NewGPOCache()
 	st.loadedCaches = make(map[string]bool)
+
+	st.gpLinksCache = make(map[string]GPLinkEntry)
+	st.computerDNMap = make(map[string]map[string]string)
 }
 
 // resolveADEntry converts a raw LDAP entry into a BloodHound-compatible typed principal.

@@ -5,25 +5,23 @@ import (
 	"fmt"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
-	"github.com/Macmod/flashingestor/msrpc"
 )
 
-// collectRegistrySessions retrieves user sessions from the registry ProfileList on a target system
-func (rc *RemoteCollector) collectRegistrySessions(ctx context.Context, targetHost string, computerSid string) builder.SessionAPIResult {
+// collectRegistrySessions retrieves user sessions from the registry on a target system
+func (rc *RemoteCollector) collectRegistrySessions(ctx context.Context, computerSid string, rpcMgr *RPCManager) builder.SessionAPIResult {
 	result := builder.SessionAPIResult{
 		APIResult: builder.APIResult{Collected: false},
 		Results:   []builder.Session{},
 	}
 
-	rpcObj, err := msrpc.NewWinregRPC(ctx, targetHost, rc.auth)
+	rpcObj, err := rpcMgr.GetOrCreateWinregRPC(ctx)
 	if err != nil {
-		errStr := fmt.Sprint(err)
+		errStr := fmt.Sprintf("failed to create WinregRPC: %v", err)
 		result.FailureReason = &errStr
 		return result
 	}
-	defer rpcObj.Close()
 
-	regSessions, err := rpcObj.GetSessionsFromRegistry(ctx)
+	regSessions, err := rpcObj.GetSessionsFromRegistry()
 	if err != nil {
 		errStr := fmt.Sprint(err)
 		result.FailureReason = &errStr
