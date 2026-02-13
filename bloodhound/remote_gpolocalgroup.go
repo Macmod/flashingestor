@@ -302,7 +302,7 @@ func (rc *RemoteCollector) ReadGPOLocalGroupsForTarget(targetDn string, gpLink s
 				gpoName = gpoEntry.Name
 				gpoGUID = gpoEntry.GUID
 			}
-			rc.logger.Log2("📦 [blue][%s[] Using cached actions for GPO '%s' (%s at %s): %d actions[-]", targetDn, gpoName, gpoGUID, linkDN, len(actions))
+			rc.logger.Log0("📦 [blue][%s[] Using cache for GPO '%s' (%s at %s): %d actions[-]", targetDn, gpoName, gpoGUID, linkDN, len(actions))
 		}
 
 		// If there are no actions for this GPO, skip it
