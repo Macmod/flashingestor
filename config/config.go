@@ -19,7 +19,6 @@ type Config struct {
 	OutputDir             string
 	LogFile               string
 	RemoteWorkers         int
-	DNSWorkers            int
 	RemoteComputerTimeout time.Duration
 	RemoteMethodTimeout   time.Duration
 	CustomDns             string
@@ -33,13 +32,12 @@ type Config struct {
 	RemoteAuth       *CredentialMgr
 	ChosenAuthIngest string
 	ChosenAuthRemote string
-	Resolver         *net.Resolver
+	Resolver         *CustomResolver
 }
 
 const DEFAULT_REMOTE_METHOD_TIMEOUT = 4 * time.Second
 const DEFAULT_REMOTE_COMPUTER_TIMEOUT = 10 * time.Second
 const DEFAULT_REMOTE_WORKERS = 50
-const DEFAULT_DNS_WORKERS = 10
 const DEFAULT_LDAP_TIMEOUT = 30 * time.Second
 const DEFAULT_LDAP_SCHEME = "ldaps"
 
@@ -56,7 +54,7 @@ const DNS_LOOKUP_TIMEOUT = 10 * time.Second // Timeout for DNS lookups
 // DialerWithResolver implements custom LDAP dialing with DNS resolver override.
 // TODO: Review if there's a better way (shouldn't ConnectTo respect my specified Resolver?)
 type DialerWithResolver struct {
-	Resolver *net.Resolver
+	Resolver *CustomResolver
 }
 
 // DialContext resolves the address using the custom resolver and dials using TCP.
@@ -111,7 +109,6 @@ func ParseFlags() (*Config, error) {
 	pflag.BoolVar(&config.PprofEnabled, "pprof", false, "Enable pprof profiling server on http://localhost:6060")
 	pflag.StringVar(&config.DomainController, "dc", "", "Domain controller to use")
 	pflag.IntVarP(&config.RemoteWorkers, "remote-workers", "w", DEFAULT_REMOTE_WORKERS, "Number of concurrent workers for remote collection")
-	pflag.IntVar(&config.DNSWorkers, "dns-workers", DEFAULT_DNS_WORKERS, "Number of concurrent workers for DNS lookups")
 	pflag.DurationVar(&config.RemoteComputerTimeout, "computer-timeout", DEFAULT_REMOTE_COMPUTER_TIMEOUT, "Timeout per computer for remote collection")
 	pflag.DurationVar(&config.RemoteMethodTimeout, "method-timeout", DEFAULT_REMOTE_METHOD_TIMEOUT, "Timeout per method of remote collection")
 
@@ -135,11 +132,18 @@ func ParseFlags() (*Config, error) {
 	}
 
 	// Setup DNS resolver
-	resolver := net.DefaultResolver
+	var resolver *CustomResolver
 	if config.CustomDns != "" {
+		var err error
 		resolver, err = setupDNSResolver(config.CustomDns, config.DnsTcp)
 		if err != nil {
 			return nil, fmt.Errorf("failed to setup DNS resolver: %w", err)
+		}
+	} else {
+		// Wrap default resolver with caching
+		resolver = &CustomResolver{
+			resolver: net.DefaultResolver,
+			cache:    newDNSCache(),
 		}
 	}
 	config.Resolver = resolver
@@ -231,8 +235,8 @@ func registerLdapFlags(opts *ldapauth.Options, flagset *pflag.FlagSet) {
 	//flagset.BoolVar(&opts.SimpleBind, "simple-bind", false, "Use simple bind instead of NTLM/Kerberos/mTLS (password required)")
 }
 
-// setupDNSResolver creates and configures a custom DNS resolver if needed.
-func setupDNSResolver(customDNS string, useTCP bool) (*net.Resolver, error) {
+// setupDNSResolver creates and configures a custom DNS resolver with caching.
+func setupDNSResolver(customDNS string, useTCP bool) (*CustomResolver, error) {
 	ip := net.ParseIP(customDNS)
 	if ip == nil {
 		return nil, fmt.Errorf("invalid custom DNS resolver IP address: '%s'", customDNS)
@@ -242,7 +246,7 @@ func setupDNSResolver(customDNS string, useTCP bool) (*net.Resolver, error) {
 		Timeout: DNS_DIAL_TIMEOUT,
 	}
 
-	resolver := net.Resolver{
+	baseResolver := &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			if useTCP {
@@ -252,5 +256,11 @@ func setupDNSResolver(customDNS string, useTCP bool) (*net.Resolver, error) {
 		},
 	}
 
-	return &resolver, nil
+	// Wrap with caching resolver
+	customResolver := &CustomResolver{
+		resolver: baseResolver,
+		cache:    newDNSCache(),
+	}
+
+	return customResolver, nil
 }

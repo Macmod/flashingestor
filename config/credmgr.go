@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
@@ -12,6 +13,41 @@ import (
 
 	"github.com/RedTeamPentesting/adauth"
 )
+
+// CustomDialer wraps a net.Dialer to use CustomResolver's cache
+type CustomDialer struct {
+	net.Dialer
+	resolver *CustomResolver
+}
+
+func (cd *CustomDialer) Dial(network, address string) (net.Conn, error) {
+	return cd.DialContext(context.Background(), network, address)
+}
+
+func (cd *CustomDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+
+	// Skip resolution if already an IP
+	if net.ParseIP(host) != nil {
+		return cd.Dialer.DialContext(ctx, network, address)
+	}
+
+	// Use cached resolver if available, otherwise use default resolution
+	if cd.resolver != nil {
+		ips, err := cd.resolver.LookupHost(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		resolvedAddr := net.JoinHostPort(ips[0], port)
+		return cd.Dialer.DialContext(ctx, network, resolvedAddr)
+	}
+
+	// Fallback to default dialer behavior (uses system DNS)
+	return cd.Dialer.DialContext(ctx, network, address)
+}
 
 type CredentialMgr struct {
 	credential  *adauth.Credential
@@ -37,14 +73,14 @@ func (a *CredentialMgr) Kerberos() bool {
 	return a.useKerberos
 }
 
-func (a *CredentialMgr) Dialer(timeout time.Duration) *net.Dialer {
-	dialer := &net.Dialer{
-		Timeout: timeout,
+func (a *CredentialMgr) Dialer(timeout time.Duration) *CustomDialer {
+	dialer := &CustomDialer{
+		Dialer: net.Dialer{Timeout: timeout},
 	}
 
 	if a.credential != nil && a.credential.Resolver != nil {
-		if resolver, ok := a.credential.Resolver.(*net.Resolver); ok {
-			dialer.Resolver = resolver
+		if customResolver, ok := a.credential.Resolver.(*CustomResolver); ok {
+			dialer.resolver = customResolver
 		}
 	}
 
@@ -53,8 +89,8 @@ func (a *CredentialMgr) Dialer(timeout time.Duration) *net.Dialer {
 
 func (a *CredentialMgr) Resolver() *net.Resolver {
 	if a.credential != nil && a.credential.Resolver != nil {
-		if resolver, ok := a.credential.Resolver.(*net.Resolver); ok {
-			return resolver
+		if customResolver, ok := a.credential.Resolver.(*CustomResolver); ok {
+			return customResolver.resolver
 		}
 	}
 

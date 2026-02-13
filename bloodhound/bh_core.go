@@ -5,7 +5,6 @@ package bloodhound
 
 import (
 	"fmt"
-	"net"
 	"path/filepath"
 	"sync/atomic"
 	"time"
@@ -81,7 +80,7 @@ type BH struct {
 	ActiveFolder                 string
 	Logger                       *core.Logger
 	RuntimeOptions               *config.RuntimeOptions
-	Resolver                     *net.Resolver
+	Resolver                     *config.CustomResolver
 	RemoteWorkers                int
 	DNSWorkers                   int
 	RemoteComputerTimeout        time.Duration
@@ -89,8 +88,10 @@ type BH struct {
 	RemoteWriteBuff              int
 	RemoteComputerCollection     map[string]*RemoteCollectionResult
 	RemoteEnterpriseCACollection map[string]*EnterpriseCARemoteCollectionResult
+	RemoteGPOChangesCollection   map[string]*GPOLocalGroupsCollectionResult
 	ConversionUpdates            chan<- core.ConversionUpdate
 	RemoteCollectionUpdates      chan<- core.RemoteCollectionUpdate
+	computerTrees                map[string]*OUTreeNode
 	abortFlag                    atomic.Bool
 	generatedFiles               []string
 	writers                      map[string]*BHFormatWriter // Indexed by "timestamp_kind"
@@ -102,13 +103,12 @@ func (bh *BH) GetPaths(fileKey string) ([]string, error) {
 }
 
 // Init initializes the BloodHound processor with necessary parameters
-func (bh *BH) Init(ldapFolder string, activeFolder string, outputFolder string, customResolver *net.Resolver, remoteWorkers int, dnsWorkers int, remoteComputerTimeout time.Duration, remoteMethodTimeout time.Duration, runtimeOptions *config.RuntimeOptions, logger *core.Logger) {
+func (bh *BH) Init(ldapFolder string, activeFolder string, outputFolder string, customResolver *config.CustomResolver, remoteWorkers int, remoteComputerTimeout time.Duration, remoteMethodTimeout time.Duration, runtimeOptions *config.RuntimeOptions, logger *core.Logger) {
 	bh.FilesMap = NewBHFilesMap()
 
 	bh.RemoteComputerTimeout = remoteComputerTimeout
 	bh.RemoteMethodTimeout = remoteMethodTimeout
 	bh.RemoteWorkers = remoteWorkers
-	bh.DNSWorkers = dnsWorkers
 	bh.RemoteWriteBuff = remoteWorkers * 10
 	bh.RuntimeOptions = runtimeOptions
 	bh.Resolver = customResolver
@@ -162,18 +162,4 @@ func (bh *BH) RequestAbort() bool {
 // IsAborted reports whether an abort was requested.
 func (bh *BH) IsAborted() bool {
 	return bh.abortFlag.Load()
-}
-
-// log sends a normal priority log message (level 0).
-func (bh *BH) log(format string, args ...interface{}) {
-	if bh.Logger != nil {
-		bh.Logger.Log0(format, args...)
-	}
-}
-
-// logVerbose sends a verbose log message (level 1).
-func (bh *BH) logVerbose(format string, args ...interface{}) {
-	if bh.Logger != nil {
-		bh.Logger.Log1(format, args...)
-	}
 }
