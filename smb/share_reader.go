@@ -51,14 +51,22 @@ func NewFileReader(auth *config.CredentialMgr) *FileReader {
 func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareConnection, error) {
 	key := server + ":" + shareName
 
-	// First, try to get an existing connection
-	fr.mu.Lock()
+	// Fast path: check with read lock
+	fr.mu.RLock()
 	conn, exists := fr.connections[key]
+	fr.mu.RUnlock()
+	if exists {
+		return conn, nil
+	}
+
+	// Slow path: need to create connection
+	fr.mu.Lock()
+	// Double-check: another goroutine might have created it while we waited for the lock
+	conn, exists = fr.connections[key]
 	if exists {
 		fr.mu.Unlock()
 		return conn, nil
 	}
-	fr.mu.Unlock()
 
 	// Create target and SMB dialer
 	target := fr.auth.NewTarget("host", server)
@@ -70,6 +78,7 @@ func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareCon
 		KerberosDialer: fr.auth.Dialer(config.KERBEROS_TIMEOUT),
 	})
 	if err != nil {
+		fr.mu.Unlock()
 		return nil, fmt.Errorf("setup SMB authentication: %w", err)
 	}
 
@@ -77,6 +86,7 @@ func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareCon
 	tcpConnDialer := fr.auth.Dialer(config.SMB_TIMEOUT)
 	tcpConn, err := tcpConnDialer.Dial("tcp", target.Address())
 	if err != nil {
+		fr.mu.Unlock()
 		return nil, fmt.Errorf("dial %s: %w", target.Address(), err)
 	}
 
@@ -84,6 +94,7 @@ func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareCon
 	sess, err := smbDialer.Dial(tcpConn)
 	if err != nil {
 		tcpConn.Close()
+		fr.mu.Unlock()
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
@@ -92,6 +103,7 @@ func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareCon
 	if err != nil {
 		sess.Logoff()
 		tcpConn.Close()
+		fr.mu.Unlock()
 		return nil, fmt.Errorf("mount share %s: %w", shareName, err)
 	}
 
@@ -102,7 +114,6 @@ func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareCon
 		server:  server,
 		name:    shareName,
 	}
-	fr.mu.Lock()
 	fr.connections[key] = conn
 	fr.mu.Unlock()
 	return conn, nil
