@@ -1,7 +1,6 @@
 package msrpc
 
 import (
-	"context"
 	"fmt"
 	"regexp"
 
@@ -10,7 +9,7 @@ import (
 
 var sidRegex = regexp.MustCompile(`^S-1-5-21-[0-9]+-[0-9]+-[0-9]+-[0-9]+$`)
 
-func (m *WinregRPC) GetSessionsFromRegistry(ctx context.Context) ([]string, error) {
+func (m *WinregRPC) GetSessionsFromRegistry() ([]string, error) {
 	sids := make([]string, 0)
 
 	openUsersResp, err := m.Client.OpenUsers(m.Context, &winreg.OpenUsersRequest{

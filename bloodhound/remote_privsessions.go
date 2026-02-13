@@ -6,23 +6,21 @@ import (
 	"strings"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
-	"github.com/Macmod/flashingestor/msrpc"
 )
 
 // collectPrivilegedSessions retrieves currently logged-on users from a target system via WKSSVC RPC
-func (rc *RemoteCollector) collectPrivilegedSessions(ctx context.Context, targetHost string, computerSam string, computerSid string) builder.SessionAPIResult {
+func (rc *RemoteCollector) collectPrivilegedSessions(ctx context.Context, computerSam string, computerSid string, rpcMgr *RPCManager) builder.SessionAPIResult {
 	result := builder.SessionAPIResult{
 		APIResult: builder.APIResult{Collected: false},
 		Results:   []builder.Session{},
 	}
 
-	rpcObj, err := msrpc.NewWkssvcRPC(ctx, targetHost, rc.auth)
+	rpcObj, err := rpcMgr.GetOrCreateWkssvcRPC(ctx)
 	if err != nil {
 		errStr := fmt.Sprint(err)
 		result.FailureReason = &errStr
 		return result
 	}
-	defer rpcObj.Close()
 
 	loggedOn, err := rpcObj.GetLoggedOnUsers(ctx)
 	if err != nil {

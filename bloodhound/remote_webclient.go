@@ -41,12 +41,13 @@ func (rc *RemoteCollector) collectIsWebClientRunning(ctx context.Context, target
 	}
 
 	pipe := &smb2.NamedPipe{
-		Address:   target.AddressWithoutPort(),
-		Port:      445,
-		Dialer:    smbDialer,
-		ShareName: "IPC$",
-		Name:      "DAV RPC SERVICE",
-		Timeout:   config.SMB_TIMEOUT,
+		Address:         target.AddressWithoutPort(),
+		Port:            445,
+		Dialer:          smbDialer,
+		NetworkDialFunc: rc.auth.Dialer(config.SMB_TIMEOUT).DialContext,
+		ShareName:       "IPC$",
+		Name:            "DAV RPC SERVICE",
+		Timeout:         config.SMB_TIMEOUT,
 	}
 
 	// Try to connect to the named pipe

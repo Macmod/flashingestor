@@ -11,15 +11,22 @@ import (
 )
 
 // collectLocalGroups retrieves local group memberships from a target system via RPC
-func (rc *RemoteCollector) collectLocalGroups(ctx context.Context, targetIp string, targetHost string, computerSid string, isDC bool, domain string) []builder.LocalGroupAPIResult {
+func (rc *RemoteCollector) collectLocalGroups(ctx context.Context, computerSid string, isDC bool, domain string, rpcMgr *RPCManager) []builder.LocalGroupAPIResult {
 	localGroupResults := []builder.LocalGroupAPIResult{}
-	rpcObj, err := msrpc.NewSamrRPC(ctx, targetIp, rc.auth)
+
+	rpcObj, err := rpcMgr.GetOrCreateSamrRPC(ctx)
 	if err != nil {
 		return localGroupResults
 	}
-	defer rpcObj.Close()
 
+	lsatClient, err := rpcMgr.GetOrCreateLsatRPC(ctx)
+	if err != nil {
+		return localGroupResults
+	}
+
+	// Can be slow, but afaik it's necessary
 	localGroups, _ := rpcObj.GetLocalGroupMembers(isDC)
+	targetHost := rpcMgr.GetTargetHost()
 
 	for _, localGroup := range localGroups {
 		groupRid := localGroup.RelativeID
@@ -40,7 +47,7 @@ func (rc *RemoteCollector) collectLocalGroups(ctx context.Context, targetIp stri
 		var results []builder.TypedPrincipal
 		var names []builder.NamedPrincipal
 
-		results, names = rc.ProcessLocalGroupMembers(ctx, localGroup.Members, computerSid, targetHost, isDC, domain)
+		results, names = rc.processLocalGroupMembers(localGroup.Members, computerSid, targetHost, isDC, domain, lsatClient)
 
 		// TODO: Any errors to handle here?
 		groupResult.APIResult = builder.APIResult{
@@ -58,12 +65,9 @@ func (rc *RemoteCollector) collectLocalGroups(ctx context.Context, targetIp stri
 }
 
 // Helpers
-func (rc *RemoteCollector) ProcessLocalGroupMembers(ctx context.Context, localMembers []string, machineSid string, machineHost string, isDC bool, domain string) ([]builder.TypedPrincipal, []builder.NamedPrincipal) {
+func (rc *RemoteCollector) processLocalGroupMembers(localMembers []string, machineSid string, machineHost string, isDC bool, domain string, rpcObj *msrpc.LsatRPC) ([]builder.TypedPrincipal, []builder.NamedPrincipal) {
 	results := []builder.TypedPrincipal{}
 	names := []builder.NamedPrincipal{}
-
-	// Lazy-initialize RPC object only when needed, reuse for all lookups
-	var rpcObj *msrpc.LsatRPC
 
 	for _, memberSid := range localMembers {
 		if isSidFiltered(memberSid) {
@@ -102,14 +106,10 @@ func (rc *RemoteCollector) ProcessLocalGroupMembers(ctx context.Context, localMe
 
 		// If the security identifier starts with the machine sid, we need to resolve it as a local object
 		if strings.HasPrefix(memberSid, machineSid+"-") {
-			// Create RPC connection on first use
+			// Skip local SID resolution if no client available
+			// Should not happen usually
 			if rpcObj == nil {
-				var err error
-				rpcObj, err = msrpc.NewLsatRPC(ctx, machineHost, rc.auth)
-				if err != nil {
-					// Failed to create RPC connection, skip all local SID lookups
-					continue
-				}
+				continue
 			}
 
 			newSid := fmt.Sprintf("%s-%s", machineSid, getRID(memberSid))
@@ -154,11 +154,6 @@ func (rc *RemoteCollector) ProcessLocalGroupMembers(ctx context.Context, localMe
 		if ok {
 			results = append(results, resolvedPrincipal)
 		}
-	}
-
-	// Close RPC connection if it was created
-	if rpcObj != nil {
-		rpcObj.Close()
 	}
 
 	return results, names

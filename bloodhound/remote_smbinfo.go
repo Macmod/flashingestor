@@ -5,23 +5,21 @@ import (
 	"fmt"
 
 	"github.com/Macmod/flashingestor/bloodhound/builder"
-	"github.com/Macmod/flashingestor/msrpc"
 )
 
 // collectSmbInfo retrieves SMB signing information from a target system via RPC
-func (rc *RemoteCollector) collectSmbInfo(ctx context.Context, targetHost string) builder.SMBInfoAPIResult {
+func (rc *RemoteCollector) collectSmbInfo(ctx context.Context, rpcMgr *RPCManager) builder.SMBInfoAPIResult {
 	result := builder.SMBInfoAPIResult{
 		APIResult: builder.APIResult{Collected: false},
 		Result:    builder.SMBInfo{},
 	}
 
-	rpcObj, err := msrpc.NewWinregRPC(ctx, targetHost, rc.auth)
+	rpcObj, err := rpcMgr.GetOrCreateWinregRPC(ctx)
 	if err != nil {
-		errStr := fmt.Sprint(err)
+		errStr := fmt.Sprintf("failed to create WinregRPC: %v", err)
 		result.FailureReason = &errStr
 		return result
 	}
-	defer rpcObj.Close()
 
 	isSigningRequired, determined, err := rpcObj.GetRegistrySigningRequired()
 	if err != nil {

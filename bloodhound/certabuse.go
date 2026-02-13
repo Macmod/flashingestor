@@ -22,14 +22,16 @@ type CertAbuseProcessor struct {
 	domain   string
 	msrpcObj *msrpc.WinregRPC
 	auth     *config.CredentialMgr
+	rpcMgr   *RPCManager
 }
 
 // NewCertAbuseProcessor creates a processor for the specified domain.
-func NewCertAbuseProcessor(domain string, msrpcObj *msrpc.WinregRPC, auth *config.CredentialMgr) *CertAbuseProcessor {
+func NewCertAbuseProcessor(domain string, msrpcObj *msrpc.WinregRPC, auth *config.CredentialMgr, rpcMgr *RPCManager) *CertAbuseProcessor {
 	return &CertAbuseProcessor{
 		domain:   domain,
 		msrpcObj: msrpcObj,
 		auth:     auth,
+		rpcMgr:   rpcMgr,
 	}
 }
 
@@ -66,7 +68,7 @@ func (cap *CertAbuseProcessor) ProcessRegistryEnrollmentPermissions(
 	}
 
 	isDomainController := cap.isDomainController(computerObjectId)
-	machineSid, _ := getMachineSID(ctx, cap.auth, computerName, computerObjectId)
+	machineSid, _ := getMachineSID(ctx, cap.rpcMgr, computerObjectId)
 
 	var aces []builder.ACE
 
@@ -187,7 +189,7 @@ func (cap *CertAbuseProcessor) ProcessEAPermissions(
 	}
 
 	isDomainController := cap.isDomainController(computerObjectId)
-	machineSid, _ := getMachineSID(ctx, cap.auth, computerName, computerObjectId)
+	machineSid, _ := getMachineSID(ctx, cap.rpcMgr, computerObjectId)
 
 	// Parse security descriptor using winacl
 	sd := &securitydescriptor.NtSecurityDescriptor{}
@@ -205,8 +207,8 @@ func (cap *CertAbuseProcessor) ProcessEAPermissions(
 	if sd.DACL != nil {
 		for _, ace := range sd.DACL.Entries {
 			restriction, success := cap.createEnrollmentAgentRestriction(
-				&ace, objectDomain, computerName,
-				isDomainController, computerObjectId, machineSid,
+				&ace, objectDomain, isDomainController,
+				computerObjectId, machineSid,
 			)
 			if success {
 				enrollmentAgentRestrictions = append(enrollmentAgentRestrictions, restriction)
@@ -386,7 +388,6 @@ func (cap *CertAbuseProcessor) isDomainController(computerObjectId string) bool 
 func (cap *CertAbuseProcessor) createEnrollmentAgentRestriction(
 	aceEntry *ace.AccessControlEntry,
 	computerDomain string,
-	computerName string,
 	isDomainController bool,
 	computerObjectId string,
 	machineSid string,

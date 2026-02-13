@@ -216,7 +216,7 @@ func (app *Application) setupUI() {
 	// Main layout with buttons at the top
 	appFlex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(app.buttonPanel, 3, 0, false).
-		AddItem(app.progressTracker, 15, 0, false).
+		AddItem(app.progressTracker, 16, 0, false).
 		AddItem(app.logPanel, 0, 1, false)
 
 	appFlex.SetTitle("FlashIngestor").

@@ -24,6 +24,7 @@ func (app *Application) SetupConversionTable() {
 	// Setup rows for each conversion step
 	steps := []string{
 		"Cache Load",
+		"RemoteResults Load",
 		"Schema",
 		"Domain",
 		"Configuration",
