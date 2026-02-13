@@ -62,7 +62,6 @@ func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareCon
 	// Slow path: need to create connection
 	fr.mu.Lock()
 	defer fr.mu.Unlock()
-	
 	// Double-check: another goroutine might have created it while we waited for the lock
 	conn, exists = fr.connections[key]
 	if exists {
