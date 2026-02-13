@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"sort"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/renderer"
+	"github.com/olekukonko/tablewriter/tw"
 	probing "github.com/prometheus-community/pro-bing"
 	"github.com/spf13/pflag"
 )
@@ -602,7 +605,9 @@ func displayResults(results []DCResult, enabledTests map[string]bool) {
 	minLatencies := calculateMinLatencies(results, testColumns, enabledTests)
 	minLatencyWins := populateTable(table, results, testColumns, enabledTests, minLatencies)
 
-	table.Render()
+	if err := table.Render(); err != nil {
+		log.Fatalf("Failed to render table: %v", err)
+	}
 	displayWinners(results, minLatencyWins)
 }
 
@@ -617,17 +622,21 @@ func buildTableHeaders(testColumns []testColumn, enabledTests map[string]bool) [
 }
 
 func setupResultsTable(headers []string) *tablewriter.Table {
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader(headers)
-	table.SetAutoWrapText(false)
-	table.SetAutoFormatHeaders(true)
-	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	table.SetAlignment(tablewriter.ALIGN_LEFT)
-	table.SetCenterSeparator("│")
-	table.SetColumnSeparator("│")
-	table.SetRowSeparator("─")
-	table.SetHeaderLine(true)
-	table.SetTablePadding(" ")
+	table := tablewriter.NewTable(os.Stdout,
+		tablewriter.WithRenderer(renderer.NewBlueprint()),
+		tablewriter.WithRendition(tw.Rendition{
+			Symbols: tw.NewSymbols(tw.StyleLight),
+			Borders: tw.Border{Top: tw.On, Bottom: tw.On, Left: tw.On, Right: tw.On},
+			Settings: tw.Settings{
+				Lines: tw.Lines{ShowHeaderLine: tw.On},
+			},
+		}),
+		tablewriter.WithHeaderAlignment(tw.AlignLeft),
+		tablewriter.WithRowAlignment(tw.AlignLeft),
+		tablewriter.WithHeaderAutoFormat(tw.On),
+		tablewriter.WithRowAutoWrap(tw.WrapTruncate),
+	)
+	table.Header(headers)
 	return table
 }
 
