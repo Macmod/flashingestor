@@ -25,6 +25,7 @@ type Config struct {
 	DnsTcp                bool
 	ConfigPath            string
 	PprofEnabled          bool
+	VerbosityLevel        int
 	LdapAuthOptions       *ldapauth.Options
 	RuntimeOptions        *RuntimeOptions
 
@@ -98,7 +99,11 @@ func ParseFlags() (*Config, error) {
 	}
 
 	// Version flag
-	pflag.BoolVarP(&showVersion, "version", "v", false, "Show version information and exit")
+	pflag.BoolVar(&showVersion, "version", false, "Show version information and exit")
+
+	// Verbosity flag (can be repeated: -v, -vv)
+	var verbosity int
+	pflag.CountVarP(&verbosity, "verbose", "v", "Increase verbosity level (can be used multiple times: -v for verbose, -vv for debug)")
 
 	// Basic settings
 	pflag.StringVar(&config.OutputDir, "outdir", "./output", "Directory to store results")
@@ -124,6 +129,11 @@ func ParseFlags() (*Config, error) {
 	registerLdapFlags(config.LdapAuthOptions, pflag.CommandLine)
 
 	pflag.Parse()
+
+	// Set verbosity from command line
+	if verbosity > 0 {
+		config.VerbosityLevel = verbosity
+	}
 
 	// Check for version flag first
 	if showVersion {
