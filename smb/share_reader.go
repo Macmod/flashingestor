@@ -37,8 +37,8 @@ type shareConnection struct {
 type FileReader struct {
 	auth        *config.CredentialMgr
 	connections map[string]*shareConnection // key: "server:share"
-	mu          sync.RWMutex
-	group       singleflight.Group // prevents duplicate concurrent connection attempts
+	mu          sync.RWMutex                // protects connections map (Go maps are not thread-safe)
+	group       singleflight.Group          // prevents duplicate concurrent connection attempts
 }
 
 // NewFileReader creates a new SMB file reader with connection pooling
@@ -49,11 +49,19 @@ func NewFileReader(auth *config.CredentialMgr) *FileReader {
 	}
 }
 
-// getOrCreateConnection returns a cached connection or creates a new one, and increments refcnt.
+// getOrCreateConnection returns a cached connection or creates a new one.
+//
+// Concurrency design:
+// - RWMutex (fr.mu): Protects the connections map from concurrent access (Go maps are not thread-safe)
+// - Singleflight (fr.group): Deduplicates concurrent connection attempts for the SAME key
+//
+// Both are necessary:
+// - Without RWMutex: map access would panic due to concurrent reads/writes
+// - Without singleflight: multiple goroutines could create duplicate connections for the same share
 func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareConnection, error) {
 	key := server + ":" + shareName
 
-	// Fast path: check with read lock
+	// Fast path: check with read lock (RWMutex allows multiple concurrent readers)
 	fr.mu.RLock()
 	conn, exists := fr.connections[key]
 	fr.mu.RUnlock()
@@ -62,7 +70,8 @@ func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareCon
 	}
 
 	// Slow path: use singleflight to ensure only one goroutine creates the connection
-	// Multiple goroutines requesting the same key will wait for the first one to complete
+	// for this specific key. Other goroutines requesting the same key will wait and
+	// receive the same result, avoiding duplicate network operations.
 	result, err, _ := fr.group.Do(key, func() (interface{}, error) {
 		// Double-check: another goroutine might have created it while we waited
 		fr.mu.RLock()
@@ -72,13 +81,16 @@ func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareCon
 			return conn, nil
 		}
 
-		// Create the connection outside of any lock to avoid blocking other shares
+		// Create the connection outside of any lock to avoid blocking other shares.
+		// This is the key benefit: goroutines creating connections for DIFFERENT shares
+		// can proceed in parallel, only serializing the brief map insertion below.
 		newConn, err := fr.createConnection(server, shareName)
 		if err != nil {
 			return nil, err
 		}
 
-		// Store the connection with a brief write lock
+		// Store the connection with a brief write lock.
+		// RWMutex is required because Go maps are not safe for concurrent access.
 		fr.mu.Lock()
 		fr.connections[key] = newConn
 		fr.mu.Unlock()
