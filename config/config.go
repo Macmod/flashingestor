@@ -132,6 +132,7 @@ func ParseFlags() (*Config, error) {
 	pflag.Parse()
 
 	// Set verbosity from command line and clamp to valid range (0-MAX_VERBOSITY_LEVEL)
+	// Note: Clamping also occurs in core.SetVerbosity() for runtime changes via keyboard
 	if verbosity > 0 {
 		if verbosity > MAX_VERBOSITY_LEVEL {
 			verbosity = MAX_VERBOSITY_LEVEL
