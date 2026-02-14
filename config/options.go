@@ -20,10 +20,6 @@ type QueryDefinition struct {
 type RuntimeOptions struct {
 	mu sync.RWMutex
 
-	Common struct {
-		Verbose int `yaml:"verbose"`
-	} `yaml:"common"`
-
 	Ingestion struct {
 		RecurseTrusts          bool              `yaml:"recurse_trusts"`
 		RecurseFeasibleOnly    bool              `yaml:"recurse_feasible_only"`
@@ -87,13 +83,6 @@ func (opts *RuntimeOptions) SaveOptions(configPath string) error {
 	}
 
 	return nil
-}
-
-// Thread-safe getters
-func (opts *RuntimeOptions) GetVerbose() int {
-	opts.mu.RLock()
-	defer opts.mu.RUnlock()
-	return opts.Common.Verbose
 }
 
 func (opts *RuntimeOptions) GetRecurseTrusts() bool {
@@ -249,12 +238,6 @@ func (opts *RuntimeOptions) HasAnyMethodsEnabled() bool {
 }
 
 // Thread-safe setters
-func (opts *RuntimeOptions) SetVerbose(level int) {
-	opts.mu.Lock()
-	defer opts.mu.Unlock()
-	opts.Common.Verbose = level
-}
-
 func (opts *RuntimeOptions) SetRecurseTrusts(enabled bool) {
 	opts.mu.Lock()
 	defer opts.mu.Unlock()

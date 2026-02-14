@@ -3,10 +3,12 @@
 package ui
 
 import (
+	"fmt"
 	"sync/atomic"
 	"time"
 
 	"github.com/Macmod/flashingestor/config"
+	"github.com/Macmod/flashingestor/core"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -289,6 +291,36 @@ func (app *Application) setupUI() {
 			return nil
 		case '3':
 			app.SwitchToPage("conversion")
+			return nil
+		case 'v':
+			// Increase verbosity
+			currentLevel := core.GetVerbosity()
+			newLevel := currentLevel + 1
+			if newLevel <= 2 {
+				core.SetVerbosity(newLevel)
+				go func() {
+					app.UpdateLog(fmt.Sprintf("📊 [purple]Verbosity increased to: %s[-]", core.VerbosityString(newLevel)))
+				}()
+			} else {
+				go func() {
+					app.UpdateLog(fmt.Sprintf("📊 [purple]Maximum verbosity set already[-]"))
+				}()
+			}
+			return nil
+		case 'V':
+			// Decrease verbosity
+			currentLevel := core.GetVerbosity()
+			newLevel := currentLevel - 1
+			if newLevel >= 0 {
+				core.SetVerbosity(newLevel)
+				go func() {
+					app.UpdateLog(fmt.Sprintf("📊 [purple]Verbosity decreased to: %s[-]", core.VerbosityString(newLevel)))
+				}()
+			} else {
+				go func() {
+					app.UpdateLog(fmt.Sprintf("📊 [purple]Minimum verbosity set already[-]"))
+				}()
+			}
 			return nil
 		}
 

@@ -54,11 +54,10 @@ func main() {
 		defer logFile.Close()
 	}
 
-	verboseLevel := cfg.RuntimeOptions.GetVerbose()
-	logger := core.NewLogger(logChannel, logFile, uiApp.UpdateLog, verboseLevel)
+	logger := core.NewLogger(logChannel, logFile, uiApp.UpdateLog, cfg.VerbosityLevel)
 	go logger.Start()
 
-	logger.Log0("🧩 Welcome to FlashIngestor " + version)
+	logger.Log0("🧩 Welcome to FlashIngestor %s", version)
 
 	// Start pprof HTTP server for profiling if enabled
 	if cfg.PprofEnabled {
@@ -73,6 +72,7 @@ func main() {
 	}
 	logger.Log0("⭕ [blue]Config file[-]: " + cfg.ConfigPath)
 	logger.Log0("⭕ [blue]Output folder[-]: " + cfg.OutputDir)
+	logger.Log0("⭕ [blue]Verbosity[-]: " + core.VerbosityString(cfg.VerbosityLevel))
 
 	resolver := cfg.Resolver
 	customDNS := cfg.CustomDns
