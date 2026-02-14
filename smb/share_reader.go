@@ -20,6 +20,7 @@ import (
 	"github.com/Macmod/flashingestor/config"
 	"github.com/RedTeamPentesting/adauth/smbauth"
 	"github.com/oiweiwei/go-smb2.fork"
+	"golang.org/x/sync/singleflight"
 )
 
 // shareConnection represents a cached connection to an SMB share
@@ -37,6 +38,7 @@ type FileReader struct {
 	auth        *config.CredentialMgr
 	connections map[string]*shareConnection // key: "server:share"
 	mu          sync.RWMutex
+	group       singleflight.Group // prevents duplicate concurrent connection attempts
 }
 
 // NewFileReader creates a new SMB file reader with connection pooling
@@ -59,15 +61,46 @@ func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareCon
 		return conn, nil
 	}
 
-	// Slow path: need to create connection
-	fr.mu.Lock()
-	defer fr.mu.Unlock()
-	// Double-check: another goroutine might have created it while we waited for the lock
-	conn, exists = fr.connections[key]
-	if exists {
-		return conn, nil
-	}
+	// Slow path: use singleflight to ensure only one goroutine creates the connection
+	// Multiple goroutines requesting the same key will wait for the first one to complete
+	result, err, _ := fr.group.Do(key, func() (interface{}, error) {
+		// Double-check: another goroutine might have created it while we waited
+		fr.mu.RLock()
+		conn, exists := fr.connections[key]
+		fr.mu.RUnlock()
+		if exists {
+			return conn, nil
+		}
 
+		// Create the connection outside of any lock to avoid blocking other shares
+		newConn, err := fr.createConnection(server, shareName)
+		if err != nil {
+			return nil, err
+		}
+
+		// Store the connection with a brief write lock
+		fr.mu.Lock()
+		// Triple-check: ensure no other goroutine stored it while we were creating
+		if existingConn, exists := fr.connections[key]; exists {
+			fr.mu.Unlock()
+			// Close the connection we just created since we'll use the existing one
+			newConn.close()
+			return existingConn, nil
+		}
+		fr.connections[key] = newConn
+		fr.mu.Unlock()
+
+		return newConn, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return result.(*shareConnection), nil
+}
+
+// createConnection creates a new SMB connection without holding any locks
+func (fr *FileReader) createConnection(server, shareName string) (*shareConnection, error) {
 	// Create target and SMB dialer
 	target := fr.auth.NewTarget("host", server)
 	target.Port = "445"
@@ -103,15 +136,26 @@ func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareCon
 		return nil, fmt.Errorf("mount share %s: %w", shareName, err)
 	}
 
-	conn = &shareConnection{
+	return &shareConnection{
 		tcpConn: tcpConn,
 		session: sess,
 		share:   fs,
 		server:  server,
 		name:    shareName,
+	}, nil
+}
+
+// close releases all resources for this connection
+func (sc *shareConnection) close() {
+	if sc.share != nil {
+		sc.share.Umount()
 	}
-	fr.connections[key] = conn
-	return conn, nil
+	if sc.session != nil {
+		sc.session.Logoff()
+	}
+	if sc.tcpConn != nil {
+		sc.tcpConn.Close()
+	}
 }
 
 // Close closes all cached connections
@@ -120,15 +164,7 @@ func (fr *FileReader) Close() {
 	defer fr.mu.Unlock()
 
 	for _, conn := range fr.connections {
-		if conn.share != nil {
-			conn.share.Umount()
-		}
-		if conn.session != nil {
-			conn.session.Logoff()
-		}
-		if conn.tcpConn != nil {
-			conn.tcpConn.Close()
-		}
+		conn.close()
 	}
 
 	fr.connections = make(map[string]*shareConnection)
