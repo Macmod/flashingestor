@@ -35,8 +35,7 @@ The main goals of this project are:
 
 - **Convert** (`Ctrl+s`) - Reads the intermediate files into memory, merges information from the ingestion and remote collection steps, and generates a Bloodhound-compatible dump under `output/bloodhound` - this step is entirely offline.
 
-> [!NOTE]
-> The main difference resource-wise is that `flashingestor` needs a bit more space to store the intermediate `msgpack` files, and it takes a bit of time to convert them into BloodHound format, but the active steps `Ingest` & `Remote` *should* be relatively efficient in terms of traffic, CPU & memory.
+For more technical details and insights, check our [📖 Wiki](wiki).
 
 # Installation
 ```bash
