@@ -41,6 +41,7 @@ const DEFAULT_REMOTE_COMPUTER_TIMEOUT = 10 * time.Second
 const DEFAULT_REMOTE_WORKERS = 50
 const DEFAULT_LDAP_TIMEOUT = 30 * time.Second
 const DEFAULT_LDAP_SCHEME = "ldaps"
+const MAX_VERBOSITY_LEVEL = 2 // Maximum verbosity level (0=normal, 1=verbose, 2=debug)
 
 // Timeout constants for various network operations
 const PORTCHECK_TIMEOUT = 2 * time.Second   // Generic timeout for port checking
@@ -130,10 +131,10 @@ func ParseFlags() (*Config, error) {
 
 	pflag.Parse()
 
-	// Set verbosity from command line and clamp to valid range (0-2)
+	// Set verbosity from command line and clamp to valid range (0-MAX_VERBOSITY_LEVEL)
 	if verbosity > 0 {
-		if verbosity > 2 {
-			verbosity = 2
+		if verbosity > MAX_VERBOSITY_LEVEL {
+			verbosity = MAX_VERBOSITY_LEVEL
 		}
 		config.VerbosityLevel = verbosity
 	}
