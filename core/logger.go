@@ -12,6 +12,7 @@ import (
 var globalVerbosity atomic.Int32
 
 // SetVerbosity changes the verbosity level at runtime for all loggers.
+// Valid range is 0-2 (0=normal, 1=verbose, 2=debug).
 func SetVerbosity(level int) {
 	if level < 0 {
 		level = 0

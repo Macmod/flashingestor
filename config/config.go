@@ -41,6 +41,7 @@ const DEFAULT_REMOTE_COMPUTER_TIMEOUT = 10 * time.Second
 const DEFAULT_REMOTE_WORKERS = 50
 const DEFAULT_LDAP_TIMEOUT = 30 * time.Second
 const DEFAULT_LDAP_SCHEME = "ldaps"
+const MAX_VERBOSITY_LEVEL = 2 // Maximum verbosity level (0=normal, 1=verbose, 2=debug)
 
 // Timeout constants for various network operations
 const PORTCHECK_TIMEOUT = 2 * time.Second   // Generic timeout for port checking
@@ -101,9 +102,9 @@ func ParseFlags() (*Config, error) {
 	// Version flag
 	pflag.BoolVar(&showVersion, "version", false, "Show version information and exit")
 
-	// Verbosity flag (can be repeated: -v, -vv)
+	// Verbosity flag (can be repeated: -v, -vv; maximum -vv)
 	var verbosity int
-	pflag.CountVarP(&verbosity, "verbose", "v", "Increase verbosity level (can be used multiple times: -v for verbose, -vv for debug)")
+	pflag.CountVarP(&verbosity, "verbose", "v", "Increase verbosity level (can be used multiple times: -v for verbose, -vv for debug; maximum -vv)")
 
 	// Basic settings
 	pflag.StringVar(&config.OutputDir, "outdir", "./output", "Directory to store results")
@@ -130,8 +131,12 @@ func ParseFlags() (*Config, error) {
 
 	pflag.Parse()
 
-	// Set verbosity from command line
+	// Set verbosity from command line and clamp to valid range (0-MAX_VERBOSITY_LEVEL)
+	// Note: Clamping also occurs in core.SetVerbosity() for runtime changes via keyboard
 	if verbosity > 0 {
+		if verbosity > MAX_VERBOSITY_LEVEL {
+			verbosity = MAX_VERBOSITY_LEVEL
+		}
 		config.VerbosityLevel = verbosity
 	}
 
