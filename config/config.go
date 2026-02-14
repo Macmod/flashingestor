@@ -101,9 +101,9 @@ func ParseFlags() (*Config, error) {
 	// Version flag
 	pflag.BoolVar(&showVersion, "version", false, "Show version information and exit")
 
-	// Verbosity flag (can be repeated: -v, -vv)
+	// Verbosity flag (can be repeated: -v, -vv; maximum -vv)
 	var verbosity int
-	pflag.CountVarP(&verbosity, "verbose", "v", "Increase verbosity level (can be used multiple times: -v for verbose, -vv for debug)")
+	pflag.CountVarP(&verbosity, "verbose", "v", "Increase verbosity level (can be used multiple times: -v for verbose, -vv for debug; maximum -vv)")
 
 	// Basic settings
 	pflag.StringVar(&config.OutputDir, "outdir", "./output", "Directory to store results")
@@ -130,8 +130,11 @@ func ParseFlags() (*Config, error) {
 
 	pflag.Parse()
 
-	// Set verbosity from command line
+	// Set verbosity from command line and clamp to valid range (0-2)
 	if verbosity > 0 {
+		if verbosity > 2 {
+			verbosity = 2
+		}
 		config.VerbosityLevel = verbosity
 	}
 
