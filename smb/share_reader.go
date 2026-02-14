@@ -80,13 +80,6 @@ func (fr *FileReader) getOrCreateConnection(server, shareName string) (*shareCon
 
 		// Store the connection with a brief write lock
 		fr.mu.Lock()
-		// Triple-check: ensure no other goroutine stored it while we were creating
-		if existingConn, exists := fr.connections[key]; exists {
-			fr.mu.Unlock()
-			// Close the connection we just created since we'll use the existing one
-			newConn.close()
-			return existingConn, nil
-		}
 		fr.connections[key] = newConn
 		fr.mu.Unlock()
 
