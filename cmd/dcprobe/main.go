@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	version = "0.1.0"
+	version = "0.2.0"
 )
 
 type DCResult struct {
@@ -633,7 +633,7 @@ func setupResultsTable(headers []string) *tablewriter.Table {
 		}),
 		tablewriter.WithHeaderAlignment(tw.AlignLeft),
 		tablewriter.WithRowAlignment(tw.AlignLeft),
-		tablewriter.WithHeaderAutoFormat(tw.On),
+		tablewriter.WithHeaderAutoFormat(tw.Off),
 		tablewriter.WithRowAutoWrap(tw.WrapTruncate),
 	)
 	table.Header(headers)
