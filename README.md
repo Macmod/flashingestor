@@ -31,11 +31,11 @@ The main goals of this project are:
 
 - **Ingest** (`Ctrl+l`) - Collects raw object attributes' data from LDAP and stores that under `output/ldap` into intermediate `msgpack` files. Queries can be customized in `config.yaml`.
 
-- **Remote** (`Ctrl+r`) - Reads these intermediate files into memory, computes the list of computers to collect, and performs a series of RPC/HTTP requests to obtain relevant remote information for `Computer` and `EnterpriseCA` objects, which are stored under `output/remote`.
+- **Remote** (`Ctrl+r`) - Reads these intermediate files into memory, computes the list of computers to collect, and performs a series of RPC/SMB/HTTP requests to obtain relevant remote information for `Computer` and `EnterpriseCA` objects, which are stored under `output/remote`.
 
 - **Convert** (`Ctrl+s`) - Reads the intermediate files into memory, merges information from the ingestion and remote collection steps, and generates a Bloodhound-compatible dump under `output/bloodhound` - this step is entirely offline.
 
-For more technical details and insights, check our [📖 Wiki](wiki).
+For more technical details and insights, check our [📖 Wiki](https://github.com/Macmod/flashingestor/wiki).
 
 # Installation
 ```bash
