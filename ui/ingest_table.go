@@ -32,7 +32,7 @@ func (app *Application) SetupIngestRow(domainName string, row int, jobName strin
 	}
 
 	app.QueueUpdateDraw(func() {
-		table.SetCell(row, 0, tview.NewTableCell("[yellow]Pending"))
+		table.SetCell(row, 0, tview.NewTableCell("[yellow]~ Pending"))
 		table.SetCell(row, 1, tview.NewTableCell(jobName))
 		table.SetCell(row, 2, tview.NewTableCell("0"))
 		table.SetCell(row, 3, tview.NewTableCell("0"))

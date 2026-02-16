@@ -44,7 +44,7 @@ func (app *Application) SetupRemoteCollectionTable(runtimeOptions *config.Runtim
 	// Setup rows for each step
 	for row, stepName := range steps {
 		rowNum := row + 1 // Row 0 is headers
-		app.remoteCollectPage.SetCell(rowNum, 0, tview.NewTableCell("[yellow]Pending"))
+		app.remoteCollectPage.SetCell(rowNum, 0, tview.NewTableCell("[yellow]~ Pending"))
 		app.remoteCollectPage.SetCell(rowNum, 1, tview.NewTableCell(stepName))
 		for col := 2; col < len(headers); col++ {
 			app.remoteCollectPage.SetCell(rowNum, col, tview.NewTableCell("-"))

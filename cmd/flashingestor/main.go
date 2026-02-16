@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	version = "0.3.1"
+	version = "0.3.2"
 )
 
 // Application entry point
@@ -84,20 +84,24 @@ func main() {
 		}
 
 		logger.Log0("🔍 [blue]Custom DNS resolver[-]: \"" + customDNS + "\"")
+	} else {
+		logger.Log0("🔍 [blue]Using system DNS resolver: consider specifying a DNS server explicitly.[-]")
 	}
 
 	logger.Log0("⭕ [blue]LDAP scheme[-]: " + cfg.LdapAuthOptions.Scheme)
 
-	// Check if we have authentication credentials
-	disableIngest := false
-	if cfg.ChosenAuthIngest == "" {
-		disableIngest = true
-		logger.Log0("🫠 [red]No authentication credentials detected for ingestion. Ingestion will be disabled for this session.[-]")
-	}
-
-	disableRemote := cfg.ChosenAuthIngest == "" && cfg.ChosenAuthRemote == ""
-	if disableRemote {
-		logger.Log0("🫠 [red]No authentication credentials detected for remote collection. Remote collection will be disabled for this session.[-]")
+	// Log LDAP obfuscation settings
+	if cfg.LdapxFilter != "" || cfg.LdapxAttrs != "" || cfg.LdapxBaseDN != "" {
+		logger.Log0("🎭 [blue]LDAP obfuscation (ldapx) enabled:[-]")
+		if cfg.LdapxFilter != "" {
+			logger.Log0("   [blue]Filter chain[-]: %s", cfg.LdapxFilter)
+		}
+		if cfg.LdapxAttrs != "" {
+			logger.Log0("   [blue]Attrs chain[-]: %s", cfg.LdapxAttrs)
+		}
+		if cfg.LdapxBaseDN != "" {
+			logger.Log0("   [blue]BaseDN chain[-]: %s", cfg.LdapxBaseDN)
+		}
 	}
 
 	bhInst := &bloodhound.BH{}
@@ -112,21 +116,98 @@ func main() {
 	if cfg.ChosenAuthIngest == "" {
 		logger.Log0("🔗 [blue]Auth method (ingestion)[-]: None")
 	} else {
+		// Auto-enable SimpleBind for anonymous authentication
+		if cfg.ChosenAuthIngest == "Anonymous" {
+			cfg.LdapAuthOptions.SimpleBind = true
+		}
+
 		authMethodIngestStr := cfg.ChosenAuthIngest
-		if cfg.IngestAuth.Kerberos() {
-			authMethodIngestStr += " [blue](over Kerberos)[-]"
+
+		// For ingestion, SimpleBind takes precedence over all methods
+		if cfg.LdapAuthOptions.SimpleBind {
+			authMethodIngestStr += " [blue](SimpleBind)[-]"
+		} else if cfg.IngestAuth.Kerberos() {
+			// Certificate with Kerberos uses PKINIT
+			// other credential types (password, NTHash, CCacche, AES Key) used with -k
+			// should just be labeled "Kerberos"
+			if cfg.ChosenAuthIngest == "CertPFX" || cfg.ChosenAuthIngest == "CertPEM" {
+				authMethodIngestStr += " [blue](PKINIT/Kerberos)[-]"
+			} else {
+				authMethodIngestStr += " [blue](Kerberos)[-]"
+			}
+		} else if cfg.ChosenAuthIngest == "CertPFX" || cfg.ChosenAuthIngest == "CertPEM" {
+			// Certificate without Kerberos can be said to use SChannel
+			authMethodIngestStr += " [blue](SChannel)[-]"
+		} else {
+			// Otherwise, Password/NTHash uses NTLM
+			authMethodIngestStr += " [blue](NTLM)[-]"
 		}
 
 		logger.Log0("🔗 [blue]Auth method (ingestion)[-]: " + authMethodIngestStr)
 	}
 
-	if cfg.RuntimeOptions.GetRecurseTrusts() {
-		ingestNoCrossDomain := !slices.Contains([]string{"Password", "NTHash", "Anonymous"}, cfg.ChosenAuthIngest) || cfg.IngestAuth.Kerberos()
-		if ingestNoCrossDomain {
-			// Kerberos cross-realm auth should be feasible to implement,
-			// but I don't know how yet :)
-			logger.Log0("🫠 [yellow]RecurseTrusts disabled (not supported for this auth method)[-]")
-			cfg.RuntimeOptions.SetRecurseTrusts(false)
+	if cfg.ChosenAuthRemote == "Anonymous" {
+		// Temporarily disabled until I can decide
+		cfg.ChosenAuthRemote = ""
+	}
+
+	if cfg.ChosenAuthRemote == "" {
+		logger.Log0("🔗 [blue]Auth method (remote collection)[-]: None")
+	} else {
+		authMethodRemoteStr := cfg.ChosenAuthRemote
+		if cfg.ChosenAuthRemote == "CertPFX" || cfg.ChosenAuthRemote == "CertPEM" {
+			// Certificates for remote collection always use PKINIT
+			authMethodRemoteStr += " [blue](PKINIT/Kerberos)[-]"
+		} else if cfg.RemoteAuth.Kerberos() {
+			// Kerberos Ticket / AESKey
+			authMethodRemoteStr += " [blue](Kerberos)[-]"
+		} else {
+			// Password / NTHash uses NTLM
+			authMethodRemoteStr += " [blue](NTLM)[-]"
+		}
+
+		logger.Log0("🔗 [blue]Auth method (remote collection)[-]: " + authMethodRemoteStr)
+	}
+
+	// Check if we have proper authentication credentials
+	// to determine whether to disable methods
+	disableIngest := false
+	if cfg.ChosenAuthIngest == "" {
+		disableIngest = true
+		logger.Log0("🫠 [red]No authentication credentials detected for ingestion. Ingestion will be disabled for this session.[-]")
+	}
+
+	disableRemote := cfg.ChosenAuthRemote == ""
+	if disableRemote {
+		logger.Log0("🫠 [red]No authentication credentials detected for remote collection. Remote collection will be disabled for this session.[-]")
+	}
+
+	// Check if we should disable recurse_trusts and search_forest
+	// when using an auth method that doesn't support cross-domain authentication
+	ingestNoCrossDomain := !slices.Contains([]string{"Password", "NTHash", "Anonymous"}, cfg.ChosenAuthIngest) || cfg.IngestAuth.Kerberos() || (cfg.LdapAuthOptions.SimpleBind && cfg.ChosenAuthIngest != "Anonymous")
+
+	if cfg.RuntimeOptions.GetRecurseTrusts() && ingestNoCrossDomain {
+		logger.Log0("🫠 [yellow]RecurseTrusts disabled (not supported for this auth method)[-]")
+		cfg.RuntimeOptions.SetRecurseTrusts(false)
+	}
+
+	if cfg.RuntimeOptions.GetSearchForest() && ingestNoCrossDomain {
+		logger.Log0("🫠 [yellow]SearchForest disabled (not supported for this auth method)[-]")
+		cfg.RuntimeOptions.SetSearchForest(false)
+	}
+
+	initialDomainRemote := strings.ToUpper(cfg.RemoteAuth.Creds().Domain)
+	remoteNoCrossDomain := initialDomainRemote != "." && (!slices.Contains([]string{"Password", "NTHash"}, cfg.ChosenAuthRemote) || cfg.RemoteAuth.Kerberos())
+	if remoteNoCrossDomain {
+		logger.Log0("🫠 [yellow]Remote collection methods will be limited to domain '" + initialDomainRemote + "' (cross-domain authentication not supported for this auth method)[-]")
+	}
+
+	// Temporary restriction until a better solution is implemented
+	// TODO: Allow for NTHash too?
+	if cfg.RuntimeOptions.IsMethodEnabled("certservices") {
+		if cfg.ChosenAuthRemote != "Password" {
+			logger.Log0("🫠 [yellow]CertServices disabled (not supported for this auth method)[-]")
+			cfg.RuntimeOptions.DisableMethod("certservices")
 		}
 	}
 
@@ -146,41 +227,18 @@ func main() {
 		searchForest:        cfg.RuntimeOptions.GetSearchForest(),
 		ldapsToLdapFallback: cfg.RuntimeOptions.GetLdapsToLdapFallback(),
 		appendForestDomains: cfg.RuntimeOptions.GetAppendForestDomains(),
+		ldapxFilter:         cfg.LdapxFilter,
+		ldapxAttrs:          cfg.LdapxAttrs,
+		ldapxBaseDN:         cfg.LdapxBaseDN,
 	}
 
 	conversionMgr := newConversionManager(bhInst, uiApp, logger)
-
-	if cfg.ChosenAuthRemote == "" {
-		logger.Log0("🔗 [blue]Auth method (remote collection)[-]: None")
-	} else {
-		authMethodRemoteStr := cfg.ChosenAuthRemote
-		if cfg.RemoteAuth.Kerberos() {
-			authMethodRemoteStr += " [blue](over Kerberos)[-]"
-		}
-
-		logger.Log0("🔗 [blue]Auth method (remote collection)[-]: " + authMethodRemoteStr)
-	}
-
-	initialDomainRemote := strings.ToUpper(cfg.RemoteAuth.Creds().Domain)
-	remoteNoCrossDomain := initialDomainRemote != "." && (!slices.Contains([]string{"Password", "NTHash", "Anonymous"}, cfg.ChosenAuthRemote) || cfg.RemoteAuth.Kerberos())
-	if remoteNoCrossDomain {
-		logger.Log0("🫠 [yellow]Remote collection methods will be limited to domain '" + initialDomainRemote + "' (cross-domain authentication not supported for this auth method)[-]")
-	}
 
 	remoteMgr := newRemoteCollectionManager(
 		bhInst,
 		uiApp,
 		logger,
 	)
-
-	// Temporary restriction until a better solution is implemented
-	// TODO: Allow for NTHash too?
-	if cfg.RuntimeOptions.IsMethodEnabled("certservices") {
-		if cfg.ChosenAuthRemote != "Password" {
-			logger.Log0("🫠 [yellow]CertServices disabled (not supported for this auth method)[-]")
-			cfg.RuntimeOptions.DisableMethod("certservices")
-		}
-	}
 
 	var initialDomain, initialBaseDN, initialDC string
 	if !disableIngest {
@@ -194,7 +252,11 @@ func main() {
 			logger.Log0("🔗 [blue]Inferred BaseDN[-]: \"%s\"", initialBaseDN)
 
 			initialDC = cfg.DomainController
-			logger.Log0("🔗 [blue]Initial DC[-]: \"%s\"", initialDC)
+			if initialDC == "" {
+				logger.Log0("🔗 [blue]Initial DC[-]: (auto-discovered)")
+			} else {
+				logger.Log0("🔗 [blue]Initial DC[-]: \"%s\"", initialDC)
+			}
 		}
 	}
 	logger.Log0("-")

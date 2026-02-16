@@ -6,6 +6,7 @@ toolchain go1.24.9
 
 require (
 	github.com/Azure/go-ntlmssp v0.1.0
+	github.com/Macmod/ldapx v1.2.1
 	github.com/RedTeamPentesting/adauth v0.5.3
 	github.com/TheManticoreProject/winacl v1.2.14
 	github.com/cespare/xxhash/v2 v2.3.0
@@ -26,7 +27,7 @@ require (
 
 require (
 	github.com/clipperhouse/displaywidth v0.10.0 // indirect
-	github.com/clipperhouse/uax29/v2 v2.6.0 // indirect
+	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/geoffgarside/ber v1.2.0 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.8-0.20250403174932-29230038a667 // indirect

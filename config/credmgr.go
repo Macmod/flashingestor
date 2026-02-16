@@ -115,9 +115,10 @@ func (a *CredentialMgr) NewTarget(protocol string, targetHost string) *adauth.Ta
 // - User + CCache
 // ==> CCache is either from KRB5CCNAME or --ccache
 // [Via regular methods]
-// - User + Certificate (depends)
+// - User + Certificate (SChannel for LDAP, for RPC only PKINIT is possible)
 // - User + Password (NTLM)
 // - User + NTHash (NTLM)
+// - Anonymous (LDAP only)
 func ParseCredential(opts *adauth.Options, isEmptyPassword bool) (string, *CredentialMgr, error) {
 	if opts == nil {
 		return "", nil, fmt.Errorf("invalid options")
@@ -154,7 +155,11 @@ func ParseCredential(opts *adauth.Options, isEmptyPassword bool) (string, *Crede
 		}
 
 		creds.NTHash = ntHash
-	} else if opts.ForceKerberos && username != "" && opts.AESKey != "" {
+	} else if username != "" && opts.AESKey != "" {
+		// AES key authentication requires Kerberos, auto-enable if not set
+		if !opts.ForceKerberos {
+			opts.ForceKerberos = true
+		}
 		method = "AESKey"
 
 		aesKeyBytes, err := hex.DecodeString(opts.AESKey)
@@ -186,7 +191,11 @@ func ParseCredential(opts *adauth.Options, isEmptyPassword bool) (string, *Crede
 
 		creds.ClientCert = cert
 		creds.ClientCertKey = key
-	} else if opts.ForceKerberos && (opts.CCache != "" || os.Getenv("KRB5CCNAME") != "") {
+	} else if opts.CCache != "" || os.Getenv("KRB5CCNAME") != "" {
+		// Ticket authentication requires Kerberos, auto-enable if not set
+		if !opts.ForceKerberos {
+			opts.ForceKerberos = true
+		}
 		method = "Ticket"
 
 		ccacheFile := os.Getenv("KRB5CCNAME")
@@ -196,9 +205,9 @@ func ParseCredential(opts *adauth.Options, isEmptyPassword bool) (string, *Crede
 
 		s, err := os.Stat(ccacheFile)
 		if err != nil {
-			return "", nil, fmt.Errorf("stat CCache path: %w", err)
+			return "", nil, fmt.Errorf("stat ccache path: %w", err)
 		} else if s.IsDir() {
-			return "", nil, fmt.Errorf("CCache path is a directory: %s", opts.CCache)
+			return "", nil, fmt.Errorf("ccache path is a directory: %s", opts.CCache)
 		}
 
 		creds.CCache = ccacheFile

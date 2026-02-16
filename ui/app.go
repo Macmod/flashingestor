@@ -133,11 +133,18 @@ func (app *Application) setupUI() {
 
 	app.currentPage = "ingest"
 
-	// Create page selector
+	// Create page selector with clickable regions
 	app.pageSelector = tview.NewTextView()
 	app.pageSelector.SetDynamicColors(true).
+		SetRegions(true).
 		SetTextAlign(tview.AlignCenter).
-		SetText("[blue](1) Ingest[-]  (2) RemoteCollect  (3) Convert")
+		SetText(`[blue]["ingest"](1) Ingest[""][-]  ["remote"](2) RemoteCollect[""]  ["conversion"](3) Convert[""]`).
+		SetHighlightedFunc(func(added, removed, remaining []string) {
+			if len(added) > 0 {
+				app.SwitchToPage(added[0])
+				app.pageSelector.Highlight() // Clear highlight after clicking
+			}
+		})
 
 	// Combine page selector and pages in a flex container
 	app.progressTracker = tview.NewFlex().SetDirection(tview.FlexRow).

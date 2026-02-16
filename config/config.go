@@ -34,6 +34,9 @@ type Config struct {
 	ChosenAuthIngest string
 	ChosenAuthRemote string
 	Resolver         *CustomResolver
+	LdapxFilter      string
+	LdapxAttrs       string
+	LdapxBaseDN      string
 }
 
 const DEFAULT_REMOTE_METHOD_TIMEOUT = 4 * time.Second
@@ -118,6 +121,11 @@ func ParseFlags() (*Config, error) {
 	pflag.DurationVar(&config.RemoteComputerTimeout, "computer-timeout", DEFAULT_REMOTE_COMPUTER_TIMEOUT, "Timeout per computer for remote collection")
 	pflag.DurationVar(&config.RemoteMethodTimeout, "method-timeout", DEFAULT_REMOTE_METHOD_TIMEOUT, "Timeout per method of remote collection")
 
+	// LDAP obfuscation flags
+	pflag.StringVarP(&config.LdapxFilter, "ldapx-filter", "f", "", "LDAP filter obfuscation middleware chain (e.g., 'OGDR', read the docs for details)")
+	pflag.StringVarP(&config.LdapxAttrs, "ldapx-attrs", "a", "", "LDAP attributes obfuscation middleware chain (e.g., 'Owp', read the docs for details)")
+	pflag.StringVarP(&config.LdapxBaseDN, "ldapx-basedn", "b", "", "LDAP baseDN obfuscation middleware chain (e.g., 'OX', read the docs for details)")
+
 	// Register adauth flags for ingestion
 	standardAuthOptions := &adauth.Options{}
 	registerIngestionAuthFlags(standardAuthOptions, pflag.CommandLine)
@@ -187,14 +195,19 @@ func ParseFlags() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Validate SimpleBind is only used with Password or Anonymous
+	if config.LdapAuthOptions.SimpleBind && chosenAuthIngest != "" && chosenAuthIngest != "Password" && chosenAuthIngest != "Anonymous" {
+		return nil, fmt.Errorf("--simple-bind can only be used with password or anonymous authentication (got %s)", chosenAuthIngest)
+	}
+
 	if ingestAuth != nil {
 		ingestAuth.SetDC(config.DomainController)
 		config.IngestAuth = ingestAuth
 	}
 
-	// Password should be required for remote collection
-	// that's why "isEmptyPassword" is always false here
-	chosenAuthRemote, remoteAuth, err := ParseCredential(remoteAuthOptions, false)
+	isEmptyPasswordV2 := remoteAuthOptions.Password == "" && pflag.CommandLine.Changed("remote-password")
+	chosenAuthRemote, remoteAuth, err := ParseCredential(remoteAuthOptions, isEmptyPasswordV2)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +260,7 @@ func registerLdapFlags(opts *ldapauth.Options, flagset *pflag.FlagSet) {
 	flagset.DurationVar(&opts.Timeout, "timeout", DEFAULT_LDAP_TIMEOUT, "LDAP connection timeout")
 	flagset.BoolVar(&opts.Verify, "verify", false, "Verify LDAP TLS certificate")
 	flagset.BoolVar(&opts.StartTLS, "start-tls", false, "Negotiate StartTLS before authenticating on regular LDAP connection")
-	//flagset.BoolVar(&opts.SimpleBind, "simple-bind", false, "Use simple bind instead of NTLM/Kerberos/mTLS (password required)")
+	flagset.BoolVar(&opts.SimpleBind, "simple-bind", false, "Use simple bind instead of NTLM/Kerberos (ingestion only, requires password)")
 }
 
 // setupDNSResolver creates and configures a custom DNS resolver with caching.

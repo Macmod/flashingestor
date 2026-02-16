@@ -68,6 +68,9 @@ type IngestionManager struct {
 	ldapsToLdapFallback bool         // whether to fallback from LDAPS to LDAP on connection failure
 	appendForestDomains bool         // whether to append to existing forest domains file
 	initialDomain       string       // the initial domain that started the ingestion
+	ldapxFilter         string       // LDAP filter obfuscation middleware chain
+	ldapxAttrs          string       // LDAP attributes obfuscation middleware chain
+	ldapxBaseDN         string       // LDAP baseDN obfuscation middleware chain
 }
 
 // JobManager methods
@@ -116,14 +119,8 @@ func (m *IngestionManager) testLDAPConnection(
 ) (string, error) {
 	var err error
 
-	creds := m.auth.Creds()
-	if creds.Username == "" && creds.Password == "" {
-		// Switch to SimpleBind only to allow for anonymous binds
-		m.ldapAuthOptions.SimpleBind = true
-	}
-
 	// Test the connection
-	conn, err := ldapauth.ConnectTo(ctx, creds, target, ldapOptions)
+	conn, err := ldapauth.ConnectTo(ctx, m.auth.Creds(), target, ldapOptions)
 	if err != nil {
 		return "", fmt.Errorf("LDAP connection failed: %w", err)
 	}
@@ -290,6 +287,7 @@ func (m *IngestionManager) start(
 				continue
 			}
 			m.ingestDomain(ctx, req.DomainName, req.BaseDN, req.DomainController)
+			m.logger.Log0("-")
 		}
 
 		// All domains have been processed, write forest structure and log final summary
@@ -303,6 +301,7 @@ func (m *IngestionManager) start(
 		} else {
 			m.logger.Log0("🫠 [red]No domains were ingested.[-]")
 		}
+		m.logger.Log0("-")
 	}()
 }
 
@@ -532,7 +531,6 @@ func (m *IngestionManager) notifyIngestionSkipped(domainName string) {
 }
 
 func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN, domainController string) {
-	m.logger.Log0("-")
 	m.uiApp.AddDomainTab(domainName)
 	m.uiApp.SwitchToDomainTab(domainName)
 	m.uiApp.InsertIngestHeader(domainName)
@@ -729,11 +727,38 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 
 		wg.Add(1)
 		spinner.SetRunning(domainName, i, true)
+
+		// Log original query
 		m.logger.Log2(
 			"🎡 Collecting \"[blue]%s[-]\" for domain \"[blue]%s[-]\":\n    [blue]Filter[-]: %s\n    [blue]Attributes[-]: %s\n    [blue]BaseDN[-]: %s",
 			job.Name, domainName, job.Filter,
 			strings.Join(job.Attributes, ","), job.BaseDN,
 		)
+
+		// Apply LDAP obfuscation if configured
+		obfuscatedJob := job
+		hasObfuscation := false
+		if m.ldapxFilter != "" {
+			obfuscatedJob.Filter = applyFilterObfuscation(job.Filter, m.ldapxFilter)
+			hasObfuscation = true
+		}
+		if m.ldapxAttrs != "" {
+			obfuscatedJob.Attributes = applyAttrListObfuscation(job.Attributes, m.ldapxAttrs)
+			hasObfuscation = true
+		}
+		if m.ldapxBaseDN != "" {
+			obfuscatedJob.BaseDN = applyBaseDNObfuscation(job.BaseDN, m.ldapxBaseDN)
+			hasObfuscation = true
+		}
+
+		// Log obfuscated query if obfuscation was applied
+		if hasObfuscation {
+			m.logger.Log2(
+				"🎡 Obfuscated \"[purple]%s[-]\" for domain \"[purple]%s[-]\":\n    [purple]Filter[-]: %s\n    [purple]Attributes[-]: %s\n    [purple]BaseDN[-]: %s",
+				obfuscatedJob.Name, domainName, obfuscatedJob.Filter,
+				strings.Join(obfuscatedJob.Attributes, ","), obfuscatedJob.BaseDN,
+			)
+		}
 
 		go func(j gildap.QueryJob, jobIndex int) {
 			m.runJob(
@@ -745,7 +770,7 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 				"🎡 Finished \"[blue]%s[-]\" for domain \"[blue]%s[-]\"",
 				j.Name, domainName,
 			)
-		}(job, i)
+		}(obfuscatedJob, i)
 	}
 
 	wg.Wait()

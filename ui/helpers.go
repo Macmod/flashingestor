@@ -20,14 +20,14 @@ func (app *Application) SwitchToPage(pageName string) {
 	app.currentPage = pageName
 	app.progressPages.SwitchToPage(pageName)
 
-	// Update page selector to highlight active page
+	// Update page selector text with blue highlighting on active page
 	switch pageName {
 	case "ingest":
-		app.pageSelector.SetText("[blue](1) Ingest[-]  (2) RemoteCollect  (3) Convert")
+		app.pageSelector.SetText(`[blue]["ingest"](1) Ingest[""][-]  ["remote"](2) RemoteCollect[""]  ["conversion"](3) Convert[""]`)
 	case "remote":
-		app.pageSelector.SetText("(1) Ingest  [blue](2) RemoteCollect[-]  (3) Convert")
+		app.pageSelector.SetText(`["ingest"](1) Ingest[""]  [blue]["remote"](2) RemoteCollect[""][-]  ["conversion"](3) Convert[""]`)
 	case "conversion":
-		app.pageSelector.SetText("(1) Ingest  (2) RemoteCollect  [blue](3) Convert[-]")
+		app.pageSelector.SetText(`["ingest"](1) Ingest[""]  ["remote"](2) RemoteCollect[""]  [blue]["conversion"](3) Convert[""][-]`)
 	}
 }
 
