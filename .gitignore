@@ -2,7 +2,6 @@
 output/
 
 # Binaries
-flashingestor
 *.exe
 *.exe~
 *.dll
