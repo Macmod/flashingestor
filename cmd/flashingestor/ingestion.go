@@ -567,10 +567,8 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 		m.uiApp.SetAbortCallback(nil)
 
 		// Track completion and close queue when all domains are done
-		if !aborted.Load() {
-			if m.pendingDomains.Add(-1) == 0 {
-				close(m.domainQueue)
-			}
+		if m.pendingDomains.Add(-1) == 0 {
+			close(m.domainQueue)
 		}
 	}()
 

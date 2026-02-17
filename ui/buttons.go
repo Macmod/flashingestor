@@ -108,17 +108,23 @@ func (app *Application) SetRunning(running bool, operationName string) {
 		app.isRunning = running
 
 		if running {
-			// Update status text
+			// Replace placeholder with actual content and update status text
 			var statusText string
 			switch operationName {
 			case "ingestion":
 				statusText = " [blue]LDAP ingestion in progress...[-]"
+				// Replace placeholder with actual ingestion page
+				app.progressPages.AddPage("ingest", app.ingestPage, true, true)
 				app.SwitchToPage("ingest")
 			case "conversion":
 				statusText = " [blue]BloodHound conversion in progress...[-]"
+				// Replace placeholder with actual conversion page
+				app.progressPages.AddPage("conversion", app.conversionPage, true, true)
 				app.SwitchToPage("conversion")
 			case "remote":
 				statusText = " [blue]Remote collection in progress...[-]"
+				// Replace placeholder with actual remote collection page
+				app.progressPages.AddPage("remote", app.remoteCollectPage, true, true)
 				app.SwitchToPage("remote")
 			}
 

@@ -16,33 +16,37 @@ import (
 // Application wraps the tview application for better organization
 type Application struct {
 	*tview.Application
-	logPanel           *tview.TextView
-	ingestTables       map[string]*tview.Table // Per-domain ingestion tables
-	ingestPages        *tview.Pages            // Pages for domain-specific ingestion tables
-	ingestTabBar       *tview.TextView         // Tab bar for domain selection
-	activeDomains      []string                // List of active domain tabs
-	activeIngestDomain string                  // Currently selected domain for ingestion view
-	remoteCollectPage  *tview.Table
-	conversionPage     *tview.Table
-	progressPages      *tview.Pages
-	progressTracker    *tview.Flex // Store reference to progress tracker
-	pageSelector       *tview.TextView
-	startIngButton     *tview.Button
-	startConvButton    *tview.Button
-	startRemoteButton  *tview.Button
-	abortButton        *tview.Button
-	buttonPanel        *tview.Flex
-	statusPanel        *tview.Flex
-	rootFlex           *tview.Flex  // Store reference to root flex
-	mainPages          *tview.Pages // Pages for modal overlays
-	isRunning          bool         // Track if any operation is currently running
-	currentPage        string
-	abortCallback      func() // Callback to abort current operation
-	ingestionCb        func() // Store callbacks for keybindings
-	conversionCb       func()
-	remoteCollectionCb func()
-	clearCacheCb       func()
-	runtimeOptions     *config.RuntimeOptions // Runtime configuration options
+	logPanel              *tview.TextView
+	ingestTables          map[string]*tview.Table // Per-domain ingestion tables
+	ingestPage            *tview.Flex             // Flex container for tab bar + ingest tables
+	ingestPages           *tview.Pages            // Pages for domain-specific ingestion tables
+	ingestTabBar          *tview.TextView         // Tab bar for domain selection
+	activeDomains         []string                // List of active domain tabs
+	activeIngestDomain    string                  // Currently selected domain for ingestion view
+	remoteCollectPage     *tview.Table
+	conversionPage        *tview.Table
+	ingestPlaceholder     *tview.TextView
+	remotePlaceholder     *tview.TextView
+	conversionPlaceholder *tview.TextView
+	progressPages         *tview.Pages
+	progressTracker       *tview.Flex // Store reference to progress tracker
+	pageSelector          *tview.TextView
+	startIngButton        *tview.Button
+	startConvButton       *tview.Button
+	startRemoteButton     *tview.Button
+	abortButton           *tview.Button
+	buttonPanel           *tview.Flex
+	statusPanel           *tview.Flex
+	rootFlex              *tview.Flex  // Store reference to root flex
+	mainPages             *tview.Pages // Pages for modal overlays
+	isRunning             bool         // Track if any operation is currently running
+	currentPage           string
+	abortCallback         func() // Callback to abort current operation
+	ingestionCb           func() // Store callbacks for keybindings
+	conversionCb          func()
+	remoteCollectionCb    func()
+	clearCacheCb          func()
+	runtimeOptions        *config.RuntimeOptions // Runtime configuration options
 
 	// Throttled update mechanism
 	pendingUpdate  atomic.Bool   // Whether a UI update is pending
@@ -107,7 +111,7 @@ func (app *Application) setupUI() {
 	app.ingestPages = tview.NewPages()
 
 	// Combine tab bar and pages in a flex container for ingestion
-	ingestPage := tview.NewFlex().SetDirection(tview.FlexRow).
+	app.ingestPage = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(app.ingestTabBar, 1, 0, false).
 		AddItem(app.ingestPages, 0, 1, true)
 
@@ -115,11 +119,27 @@ func (app *Application) setupUI() {
 	app.remoteCollectPage = tview.NewTable()
 	app.conversionPage = tview.NewTable()
 
-	// Create pages for the progress tracker
+	// Create placeholder text views for each operation
+	app.ingestPlaceholder = tview.NewTextView().
+		SetText("Press [blue]Ctrl+L[-] to perform LDAP ingestion.").
+		SetTextAlign(tview.AlignCenter).
+		SetDynamicColors(true)
+
+	app.remotePlaceholder = tview.NewTextView().
+		SetText("Press [blue]Ctrl+R[-] to perform remote collection.").
+		SetTextAlign(tview.AlignCenter).
+		SetDynamicColors(true)
+
+	app.conversionPlaceholder = tview.NewTextView().
+		SetText("Press [blue]Ctrl+S[-] to convert the results from previous steps into the final dump.").
+		SetTextAlign(tview.AlignCenter).
+		SetDynamicColors(true)
+
+	// Create pages for the progress tracker - start with placeholders
 	app.progressPages = tview.NewPages().
-		AddPage("ingest", ingestPage, true, true).
-		AddPage("remote", app.remoteCollectPage, true, false).
-		AddPage("conversion", app.conversionPage, true, false)
+		AddPage("ingest", app.ingestPlaceholder, true, true).
+		AddPage("remote", app.remotePlaceholder, true, false).
+		AddPage("conversion", app.conversionPlaceholder, true, false)
 	app.progressPages.SetBorder(true).SetBorderColor(tcell.ColorWhite)
 	app.progressPages.
 		SetFocusFunc(func() {

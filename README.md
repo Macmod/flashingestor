@@ -99,7 +99,11 @@ You must then specify `--dns` if your standard DNS server is not aware of the do
 
 ## Config file
 
-If the config file is not present under the current directory as `config.yaml` or in the path provided via `--config`, the default options (the same as in the provided [config.yaml](config.yaml)) will be assumed - they are hardcoded in [config/fallback.go](config/fallback.go). For more information read [Configuration File](https://github.com/Macmod/flashingestor/wiki/Configuration#configuration-file-configyaml).
+If the config file is not present under the current directory as `config.yaml` or in the path provided via `--config`, the default options (the same as in the provided [config.yaml](config.yaml)) will be assumed - they are hardcoded in [config/fallback.go](config/fallback.go). For more information, read [Configuration File](https://github.com/Macmod/flashingestor/wiki/Configuration#configuration-file-configyaml).
+
+## Other Options
+
+Consider using `--log` to specify an output file for logs (in case you will need to review them after closing the TUI) and `-vv` to see debug log messages, as these may help troubleshoot possible issues. For a full reference of command-line arguments, read [Command-Line Arguments](https://github.com/Macmod/flashingestor/wiki/Configuration#command-line-arguments).
 
 ## Ingestion
 
@@ -120,7 +124,7 @@ This means outbound-only trusts will not be traversed, and apart from the first 
 > [!IMPORTANT]
 > `recurse_trusts` / `search_forest` will only authenticate to LDAP in discovered domains with the specified credentials from the source domain when the provided credentials are either `plain password` or an `NT hash`; using a TGT to issue a referral ticket for this purpose is theoretically possible but [not yet implemented](https://github.com/RedTeamPentesting/adauth/issues/6) in the `adauth` library.
 
-Middleware chains from [ldapx](https://github.com/Macmod/ldapx) can also be used directly with `flashingestor` to **obfuscate the LDAP queries** in the ingestion step by using the `-f` (`--ldapx-filter`), `-a` (`--ldapx-attrs`) and `-b` (`--ldapx-basedn`) options. With `-vv`, the raw queries before and after obfuscation will also be shown in the log.
+Middleware chains from [Macmod/ldapx](https://github.com/Macmod/ldapx) can also be used directly with `flashingestor` to **obfuscate the LDAP queries** in the ingestion step by using the `-f` (`--ldapx-filter`), `-a` (`--ldapx-attrs`) and `-b` (`--ldapx-basedn`) options. With `-vv`, the raw queries before and after obfuscation will also be shown in the log.
  
 ## Remote Collection
 
