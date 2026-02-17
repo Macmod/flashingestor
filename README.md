@@ -19,7 +19,7 @@ The main goals of this project are:
 
 1. Be a **full data ingestor** compatible with BloodHound CE (Community Edition)
 2. Be faster, less noisy, and more customizable than other collectors
-3. Be a friendly TUI (terminal user interface) with progress tracking
+3. Provide a friendly TUI (terminal user interface) with progress tracking
 
 # Demo
 
@@ -82,13 +82,13 @@ or
 $ KRB5CCNAME=/path/to/ticket.ccache ./flashingestor -u <USER>@<DOMAIN> -k [...]
 ```
 
-Then run the steps as desired. For a LDAP-only collection (`DCOnly` with exception of `GPOLocalGroup` and `CertServices`), just run `Ctrl+l`, check whether the ingestion succeeded, and then run `Ctrl+s` to generate the final dump.
+Then run the steps as desired. For an LDAP-only collection (`DCOnly` with exception of `GPOLocalGroup` and `CertServices`), just run `Ctrl+l`, check whether the ingestion succeeded, and then run `Ctrl+s` to generate the final dump.
 
 ## DC discovery & DNS
 
-It's always recommended to specify `--dc` and `--dns` to run `flashingestor`. If you don't specify `--dc`, `flashingestor` will try to find it with SRV / A lookups, which may add some initial delay to the `Ingest` step.
+Specifying `--dc` and `--dns` to run `flashingestor` is recommended. If you don't specify `--dc`, `flashingestor` will try to find it with SRV / A lookups, which may delay the initial `Ingest` step.
 
-In that case, you must specify `--dns` if your standard DNS server is not aware of the domain (when AD-integrated DNS is in use, just point it to the DC that hosts it). Moreover, regardless of `--dc`, if you want to run the `Remote Collection` step and your DNS server is not aware of computers in the domain, then you must specify `--dns` for the lookups.
+You must then specify `--dns` if your standard DNS server is not aware of the domain - when AD-integrated DNS is in use, just point `--dns` to the DC that hosts it. Additionally, regardless of `--dc`, if you want to run the `Remote Collection` step and your DNS server is not aware of computers in the domain, then you must specify `--dns` for the lookups.
 
 > [!TIP]
 > In environments with multiple DCs, you can also use the `dcprobe` utility to benchmark the latency to all DCs and find a good target candidate for the ingestion:
@@ -106,25 +106,33 @@ If the config file is not present under the current directory as `config.yaml` o
 > [!NOTE]
 > The default queries in the provided `config.yaml` are designed with information needed by Bloodhound conversion in mind. You may choose to customize queries or attributes in `config.yaml`, but it's best to try to avoid removing needed attributes, and to avoid changing the meaning of the search filters.
 
-If `recurse_trusts` is set to `true`, it'll try to ingest any trusted domains found recursively with the initial credential provided for ingestion.
+If `recurse_trusts` is set to `true`, it will ingest any trusted domains found recursively with the initial credential provided for ingestion.
 
-If `search_forest` is set to `true`, it'll try to ingest domains that are part of the same forest as the initial domain from the `Configuration` partition - no additional queries will be issued, as this is already part of the default ingestion plan. Both options can be set at the same time, and `flashingestor` will only ingest any domain found once (either via a trust, or via the current forest).
+If `search_forest` is set to `true`, it will ingest domains that are part of the same forest as the initial domain from the `Configuration` partition - no additional queries will be issued, as this is already part of the default ingestion plan. Both options can be set at the same time, and `flashingestor` will only ingest any domain found once (either via a trust, or via the current forest).
 
-If `recurse_trusts` is enabled and `recurse_feasible_only` is also set to true, it'll only try to ingest a trusted domain if the trust is (1) inbound/bidirectional and (2) either involves the initial domain, or is transitive. That means that outbound-only trusts won't be traversed, and apart from the first level of trusts, the ingestion paths stop at nontransitive trusts - if B trusts A nontransitively, then A can still authenticate into B; but if C also trusts B nontransitively, then A can't authenticate to C.
+If `recurse_trusts` is enabled and `recurse_feasible_only` is also set to true, it will only try to ingest a trusted domain if the trust is:
 
-You can also use middleware chains from [ldapx](https://github.com/Macmod/ldapx) straight from `flashingestor` to obfuscate the LDAP queries in the ingestion step by using the `-f` (`--ldapx-filter`), `-a` (`--ldapx-attrs`) and `-b` (`--ldapx-basedn`) options. With `-vv`, the raw queries before and after obfuscation will also be shown in the log.
+1) Inbound/bidirectional and 
+2) The trust either involves the initial domain, or is transitive.
+
+This means outbound-only trusts will not be traversed, and apart from the first level of trusts, the ingestion paths stop at nontransitive trusts - if B trusts A nontransitively, then A can still authenticate into B; but if C also trusts B nontransitively, then A can't authenticate to C.
+
+> [!IMPORTANT]
+> `recurse_trusts` / `search_forest` will only authenticate to LDAP in discovered domains with the specified credentials from the source domain when the provided credentials are either `plain password` or an `NT hash`; using a TGT to issue a referral ticket for this purpose is theoretically possible but [not yet implemented](https://github.com/RedTeamPentesting/adauth/issues/6) in the `adauth` library.
+
+Middleware chains from [ldapx](https://github.com/Macmod/ldapx) can also be used directly with `flashingestor` to **obfuscate the LDAP queries** in the ingestion step by using the `-f` (`--ldapx-filter`), `-a` (`--ldapx-attrs`) and `-b` (`--ldapx-basedn`) options. With `-vv`, the raw queries before and after obfuscation will also be shown in the log.
  
 ## Remote Collection
 
 If you intend to run the remote collection step, check the enabled `methods` - these roughly correspond to the methods offered by SharpHound and can be used to toggle specific collections via RPC or HTTP.
 
-The `--remote-*` arguments can be used to specify a separate set of credentials for remote collection. If you don't specify these credentials, `flashingestor` will try to use the same credentials for the user provided in the standard ingestion arguments (`--user`, `--password`, etc).
+The `--remote-*` arguments can be used to specify a separate set of credentials for remote collection. If not specified, `flashingestor` will try to use the same credentials for the user provided in the standard ingestion arguments (`--user`, `--password`, etc).
 
 A local admin can also be used for remote collection by specifying `--remote-user Administrator@.`, for example, but the effectiveness of this approach will depend on whether the account is the built-in administrator or not, and on the values of the `FilterAdministratorToken` / `LocalAccountTokenFilterPolicy` registry keys. For more detail on this behavior, refer to [Pass-the-Hash Is Dead: Long Live LocalAccountTokenFilterPolicy](https://specterops.io/blog/2017/03/16/pass-the-hash-is-dead-long-live-localaccounttokenfilterpolicy/)
 
 ## Conversion
 
-The options `compress_output` and `cleanup_after_compression` can help keep the disk usage small. After loading the final dump in Bloodhound you can safely delete the files under `output/ldap` and `output/remote` manually if you don't have an use for them, but an interesting use case is keeping these files to look up important information and to avoid having to run the full collection from time to time.
+The options `compress_output` and `cleanup_after_compression` can help keep the disk usage small. After loading the final dump in Bloodhound you can safely delete the files under `output/ldap` and `output/remote` manually if you don't need them, but these files can be retained to look up important information without having to re-run the full collection.
 
 > [!TIP]
 > The primary purpose of the `msgpack` files under the `output/ldap` and `output/remote` folders is to serve as an intermediary format to segregate responsibilities for the entire process, but these files can also be used as a source of information by converting them to JSON - this way you don't have to look up raw object attributes or remote collection results:
@@ -149,13 +157,9 @@ Contributions are welcome by [opening an issue](https://github.com/Macmod/flashi
 
 # Known Issues
 
-## Ingestion
-
-* `recurse_trusts` / `search_forest` only automatically authenticate to LDAP in other discovered domains with the specified credentials from the source domain when the provided authentication material is either a `plain password` or an `NT hash`; using a TGT to issue a referral ticket for this purpose is theoretically possible but [not yet implemented](https://github.com/RedTeamPentesting/adauth/issues/6) in the `adauth` library.
-
 ## Remote Collection
 
-* Similarly as the restriction of methods allowed for cross-domain authentication in ingestion, when running remote collection with Kerberos (for example, when the user is part of `Protected Users` or when NTLM authentication is blocked via security settings) or with certificates, remote collection won't try to authenticate to computers of domains that differ from the domain to which the user belongs. This also applies to the `GPOLocalGroup` method, which in those cases won't try to read GPO files from DCs of other domains, even if there are multiple domains in the ingested data.
+* Similarly as the restriction of methods allowed for cross-domain authentication in ingestion, when running remote collection with Kerberos (for example, when the user is part of `Protected Users` or when NTLM authentication is blocked via security settings) or with certificates (which uses PKINIT under the hood), remote collection won't try to authenticate to computers of domains that differ from the domain to which the user belongs. This also applies to the `GPOLocalGroup` method, which in those cases won't try to read GPO files from DCs of other domains, even if there are multiple domains in the ingested data.
 * `SmbInfo` for the `Computer` type is still a basic implementation (registry checks only).
 * `HttpEnrollmentEndpoints` only works with a provided username/password.
 * `AllowedToDelegateTo` / `ServicePrincipalNames` resolution is still a basic implementation.
