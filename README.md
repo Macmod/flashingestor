@@ -82,7 +82,7 @@ or
 $ KRB5CCNAME=/path/to/ticket.ccache ./flashingestor -u <USER>@<DOMAIN> -k [...]
 ```
 
-Then run the steps as desired. For a `DCOnly` collection, just run `Ctrl+l`, check whether the ingestion succeeded, and then run `Ctrl+s` to generate the final dump.
+Then run the steps as desired. For a LDAP-only collection (`DCOnly` with exception of `GPOLocalGroup` and `CertServices`), just run `Ctrl+l`, check whether the ingestion succeeded, and then run `Ctrl+s` to generate the final dump.
 
 ## DC discovery & DNS
 
@@ -99,7 +99,7 @@ In that case, you must specify `--dns` if your standard DNS server is not aware 
 
 ## Config file
 
-If the config file is not present under the current directory as `config.yaml` or in the path provided via `--config`, the default options (the same as in the provided [config.yaml](config.yaml)) will be assumed - they are hardcoded in [config/fallback.go](config/fallback.go).
+If the config file is not present under the current directory as `config.yaml` or in the path provided via `--config`, the default options (the same as in the provided [config.yaml](config.yaml)) will be assumed - they are hardcoded in [config/fallback.go](config/fallback.go). For more information read [Configuration File](https://github.com/Macmod/flashingestor/wiki/Configuration#configuration-file-configyaml).
 
 ## Ingestion
 
@@ -111,6 +111,8 @@ If `recurse_trusts` is set to `true`, it'll try to ingest any trusted domains fo
 If `search_forest` is set to `true`, it'll try to ingest domains that are part of the same forest as the initial domain from the `Configuration` partition - no additional queries will be issued, as this is already part of the default ingestion plan. Both options can be set at the same time, and `flashingestor` will only ingest any domain found once (either via a trust, or via the current forest).
 
 If `recurse_trusts` is enabled and `recurse_feasible_only` is also set to true, it'll only try to ingest a trusted domain if the trust is (1) inbound/bidirectional and (2) either involves the initial domain, or is transitive. That means that outbound-only trusts won't be traversed, and apart from the first level of trusts, the ingestion paths stop at nontransitive trusts - if B trusts A nontransitively, then A can still authenticate into B; but if C also trusts B nontransitively, then A can't authenticate to C.
+
+You can also use middleware chains from [ldapx](https://github.com/Macmod/ldapx) straight from `flashingestor` to obfuscate the LDAP queries in the ingestion step by using the `-f` (`--ldapx-filter`), `-a` (`--ldapx-attrs`) and `-b` (`--ldapx-basedn`) options. With `-vv`, the raw queries before and after obfuscation will also be shown in the log.
  
 ## Remote Collection
 
