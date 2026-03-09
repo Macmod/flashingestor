@@ -60,6 +60,7 @@ const DNS_LOOKUP_TIMEOUT = 10 * time.Second // Timeout for DNS lookups
 // TODO: Review if there's a better way (shouldn't ConnectTo respect my specified Resolver?)
 type DialerWithResolver struct {
 	Resolver *CustomResolver
+	Timeout  time.Duration
 }
 
 // DialContext resolves the address using the custom resolver and dials using TCP.
@@ -75,9 +76,15 @@ func (d *DialerWithResolver) DialContext(ctx context.Context, network, addr stri
 		return nil, err
 	}
 
+	// Use configured timeout, fallback to default if not set
+	timeout := d.Timeout
+	if timeout == 0 {
+		timeout = DEFAULT_LDAP_TIMEOUT
+	}
+
 	// Try each IP until connection succeeds
 	for _, ip := range ips {
-		conn, err := net.DialTimeout(network, net.JoinHostPort(ip, port), DEFAULT_LDAP_TIMEOUT)
+		conn, err := net.DialTimeout(network, net.JoinHostPort(ip, port), timeout)
 		if err == nil {
 			return conn, nil
 		}
@@ -184,10 +191,12 @@ func ParseFlags() (*Config, error) {
 	// Used for LDAP connections
 	config.LdapAuthOptions.LDAPDialer = &DialerWithResolver{
 		Resolver: resolver,
+		Timeout:  config.LdapAuthOptions.Timeout,
 	}
 
 	config.LdapAuthOptions.KerberosDialer = &DialerWithResolver{
 		Resolver: resolver,
+		Timeout:  KERBEROS_TIMEOUT,
 	}
 
 	isEmptyPassword := standardAuthOptions.Password == "" && pflag.CommandLine.Changed("password")
