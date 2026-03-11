@@ -71,6 +71,7 @@ type IngestionManager struct {
 	ldapxFilter         string       // LDAP filter obfuscation middleware chain
 	ldapxAttrs          string       // LDAP attributes obfuscation middleware chain
 	ldapxBaseDN         string       // LDAP baseDN obfuscation middleware chain
+	pageSizeOverride    int          // override page size for all LDAP queries (0 = use defaults)
 	ldapWorkers         int          // max concurrent LDAP query jobs
 	jobFilter           map[string]bool // if non-empty, only run jobs whose name is in this set (lowercase keys)
 }
@@ -689,6 +690,14 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 	}
 
 	m.logger.Log0("🚀 [cyan]Starting LDAP ingestion of \"%s\"...[-]", domainName)
+
+	// Apply page size override if configured
+	if m.pageSizeOverride > 0 {
+		for i := range jobs {
+			jobs[i].PageSize = uint32(m.pageSizeOverride)
+		}
+		m.logger.Log1("📐 [blue]Page size overridden to %d for all queries[-]", m.pageSizeOverride)
+	}
 
 	for i, job := range jobs {
 		// For forest-wide queries, save in forest root folder if available;

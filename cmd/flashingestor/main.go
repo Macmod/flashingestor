@@ -230,6 +230,7 @@ func main() {
 		ldapxFilter:         cfg.LdapxFilter,
 		ldapxAttrs:          cfg.LdapxAttrs,
 		ldapxBaseDN:         cfg.LdapxBaseDN,
+		pageSizeOverride:    cfg.PageSizeOverride,
 		ldapWorkers:         cfg.LdapWorkers,
 		jobFilter:           parseJobFilter(cfg.JobFilter),
 	}
