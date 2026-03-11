@@ -230,6 +230,7 @@ func main() {
 		ldapxFilter:         cfg.LdapxFilter,
 		ldapxAttrs:          cfg.LdapxAttrs,
 		ldapxBaseDN:         cfg.LdapxBaseDN,
+		ldapWorkers:         cfg.LdapWorkers,
 	}
 
 	conversionMgr := newConversionManager(bhInst, uiApp, logger)
