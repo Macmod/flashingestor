@@ -72,6 +72,8 @@ type IngestionManager struct {
 	ldapxAttrs          string       // LDAP attributes obfuscation middleware chain
 	ldapxBaseDN         string       // LDAP baseDN obfuscation middleware chain
 	pageSizeOverride    int          // override page size for all LDAP queries (0 = use defaults)
+	ldapWorkers         int          // max concurrent LDAP query jobs
+	jobFilter           map[string]bool // if non-empty, only run jobs whose name is in this set (lowercase keys)
 }
 
 // JobManager methods
@@ -721,7 +723,14 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 	}()
 
 	var wg sync.WaitGroup
+	sem := make(chan struct{}, m.ldapWorkers)
 	for i, job := range jobs {
+		// Skip jobs not in the filter (if a filter is set)
+		if m.jobFilter != nil && !m.jobFilter[strings.ToLower(job.Name)] {
+			m.uiApp.UpdateIngestRow(domainName, job.Row, "[yellow]- Skipped[-]", "-", "-", "-", "-", "-")
+			continue
+		}
+
 		// Skip forest-wide jobs if already collected
 		if job.Name == "Configuration" && (forestRootFolder == "" || (forestStatus != nil && forestStatus.Configuration)) {
 			m.uiApp.UpdateIngestRow(domainName, job.Row, "[yellow]- Skipped[-]", "-", "-", "-", "-", "-")
@@ -733,7 +742,6 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 		}
 
 		wg.Add(1)
-		spinner.SetRunning(domainName, i, true)
 
 		// Log original query
 		m.logger.Log2(
@@ -767,7 +775,10 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 			)
 		}
 
+		sem <- struct{}{} // acquire semaphore
 		go func(j gildap.QueryJob, jobIndex int) {
+			defer func() { <-sem }() // release semaphore
+			spinner.SetRunning(domainName, jobIndex, true)
 			m.runJob(
 				ctx, m.auth.Creds(), target, ldapOptions,
 				j, jobIndex, domainName,
