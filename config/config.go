@@ -19,6 +19,7 @@ type Config struct {
 	OutputDir             string
 	LogFile               string
 	RemoteWorkers         int
+	JobFilter             string
 	RemoteComputerTimeout time.Duration
 	RemoteMethodTimeout   time.Duration
 	CustomDns             string
@@ -125,6 +126,7 @@ func ParseFlags() (*Config, error) {
 	pflag.BoolVar(&config.PprofEnabled, "pprof", false, "Enable pprof profiling server on http://localhost:6060")
 	pflag.StringVar(&config.DomainController, "dc", "", "Domain controller to use")
 	pflag.IntVarP(&config.RemoteWorkers, "remote-workers", "w", DEFAULT_REMOTE_WORKERS, "Number of concurrent workers for remote collection")
+	pflag.StringVar(&config.JobFilter, "jobs", "", "Comma-separated list of LDAP jobs to run (e.g., 'Users,Groups'). Empty = run all")
 	pflag.DurationVar(&config.RemoteComputerTimeout, "computer-timeout", DEFAULT_REMOTE_COMPUTER_TIMEOUT, "Timeout per computer for remote collection")
 	pflag.DurationVar(&config.RemoteMethodTimeout, "method-timeout", DEFAULT_REMOTE_METHOD_TIMEOUT, "Timeout per method of remote collection")
 

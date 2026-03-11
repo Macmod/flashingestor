@@ -71,6 +71,7 @@ type IngestionManager struct {
 	ldapxFilter         string       // LDAP filter obfuscation middleware chain
 	ldapxAttrs          string       // LDAP attributes obfuscation middleware chain
 	ldapxBaseDN         string       // LDAP baseDN obfuscation middleware chain
+	jobFilter           map[string]bool // if non-empty, only run jobs whose name is in this set (lowercase keys)
 }
 
 // JobManager methods
@@ -713,6 +714,12 @@ func (m *IngestionManager) ingestDomain(ctx context.Context, domainName, baseDN,
 
 	var wg sync.WaitGroup
 	for i, job := range jobs {
+		// Skip jobs not in the filter (if a filter is set)
+		if m.jobFilter != nil && !m.jobFilter[strings.ToLower(job.Name)] {
+			m.uiApp.UpdateIngestRow(domainName, job.Row, "[yellow]- Skipped[-]", "-", "-", "-", "-", "-")
+			continue
+		}
+
 		// Skip forest-wide jobs if already collected
 		if job.Name == "Configuration" && (forestRootFolder == "" || (forestStatus != nil && forestStatus.Configuration)) {
 			m.uiApp.UpdateIngestRow(domainName, job.Row, "[yellow]- Skipped[-]", "-", "-", "-", "-", "-")

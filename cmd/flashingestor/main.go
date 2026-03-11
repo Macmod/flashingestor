@@ -230,6 +230,7 @@ func main() {
 		ldapxFilter:         cfg.LdapxFilter,
 		ldapxAttrs:          cfg.LdapxAttrs,
 		ldapxBaseDN:         cfg.LdapxBaseDN,
+		jobFilter:           parseJobFilter(cfg.JobFilter),
 	}
 
 	conversionMgr := newConversionManager(bhInst, uiApp, logger)
@@ -364,6 +365,27 @@ func main() {
 	if err := uiApp.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// parseJobFilter parses a comma-separated list of job names into a set.
+// Keys are stored lowercase for case-insensitive matching.
+// Returns nil if the input is empty (meaning run all jobs).
+func parseJobFilter(s string) map[string]bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	filter := make(map[string]bool)
+	for _, name := range strings.Split(s, ",") {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			filter[strings.ToLower(name)] = true
+		}
+	}
+	if len(filter) == 0 {
+		return nil
+	}
+	return filter
 }
 
 // printVersion prints version information
