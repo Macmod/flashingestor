@@ -43,6 +43,12 @@ func BuildUserFromEntry(entry *gildap.LDAPEntry) (*User, bool) {
 		}
 	}
 
+	spns := entry.GetAttrVals("servicePrincipalName", []string{})
+	lastLogonTimestamp := gildap.FormatTime2(entry.GetAttrVal("lastLogonTimestamp", "0"))
+	if lastLogonTimestamp == 0 {
+		lastLogonTimestamp = -1
+	}
+
 	props := UserProperties{
 		BaseProperties:          baseProps,
 		Name:                    userName,
@@ -51,12 +57,13 @@ func BuildUserFromEntry(entry *gildap.LDAPEntry) (*User, bool) {
 		PasswordNotReqd:         uac&0x00000020 == 0x00000020,
 		Enabled:                 uac&2 == 0,
 		LastLogon:               gildap.FormatTime2(entry.GetAttrVal("lastLogon", "0")),          // raw
-		LastLogonTimestamp:      gildap.FormatTime2(entry.GetAttrVal("lastLogonTimestamp", "0")), // raw
+		LastLogonTimestamp:      lastLogonTimestamp,
 		PwdLastSet:              gildap.FormatTime2(entry.GetAttrVal("pwdLastSet", "0")),         // raw
 		DontReqPreauth:          uac&0x00400000 == 0x00400000,
 		PwdNeverExpires:         uac&0x00010000 == 0x00010000,
 		Sensitive:               uac&0x00100000 == 0x00100000,
-		ServicePrincipalNames:   entry.GetAttrVals("servicePrincipalName", []string{}),
+		ServicePrincipalNames:   spns,
+		HasSPN:                  len(spns) > 0,
 		DisplayName:             entry.GetAttrVal("displayName", ""),
 		Email:                   entry.GetAttrVal("mail", ""),
 		Title:                   entry.GetAttrVal("title", ""),
@@ -153,11 +160,6 @@ func BuildUserFromEntry(entry *gildap.LDAPEntry) (*User, bool) {
 				})
 			}
 		}
-	}
-
-	props.HasSPN = len(props.ServicePrincipalNames) > 0
-	if props.LastLogonTimestamp == 0 {
-		props.LastLogonTimestamp = -1
 	}
 
 	user.Properties.IsACLProtected = user.IsACLProtected
