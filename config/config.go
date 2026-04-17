@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/RedTeamPentesting/adauth"
@@ -29,6 +31,7 @@ type Config struct {
 	ConfigPath            string
 	PprofEnabled          bool
 	VerbosityLevel        int
+	SocksProxy            string
 	LdapAuthOptions       *ldapauth.Options
 	RuntimeOptions        *RuntimeOptions
 
@@ -61,14 +64,44 @@ const DNS_DIAL_TIMEOUT = 5 * time.Second    // Timeout for dialing to DNS server
 const DNS_LOOKUP_TIMEOUT = 10 * time.Second // Timeout for DNS lookups
 
 // DialerWithResolver implements custom LDAP dialing with DNS resolver override.
+// When SocksDial is set, it is used for every connection and local DNS
+// resolution is bypassed so the proxy handles the name lookup.
 // TODO: Review if there's a better way (shouldn't ConnectTo respect my specified Resolver?)
 type DialerWithResolver struct {
-	Resolver *CustomResolver
-	Timeout  time.Duration
+	Resolver  *CustomResolver
+	Timeout   time.Duration
+	SocksDial func(network, address string) (net.Conn, error)
 }
 
 // DialContext resolves the address using the custom resolver and dials using TCP.
 func (d *DialerWithResolver) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	// Route through SOCKS when configured. Hostname is passed through so the
+	// proxy performs the lookup (socks4a / socks5). For plain socks4, the
+	// caller must provide an IP.
+	if d.SocksDial != nil {
+		type result struct {
+			conn net.Conn
+			err  error
+		}
+		ch := make(chan result, 1)
+		go func() {
+			c, err := d.SocksDial(network, addr)
+			ch <- result{c, err}
+		}()
+		select {
+		case <-ctx.Done():
+			go func() {
+				r := <-ch
+				if r.conn != nil {
+					r.conn.Close()
+				}
+			}()
+			return nil, ctx.Err()
+		case r := <-ch:
+			return r.conn, r.err
+		}
+	}
+
 	// Use your resolver to resolve the address first
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -140,6 +173,10 @@ func ParseFlags() (*Config, error) {
 	pflag.StringVarP(&config.LdapxAttrs, "ldapx-attrs", "a", "", "LDAP attributes obfuscation middleware chain (e.g., 'Owp', read the docs for details)")
 	pflag.StringVarP(&config.LdapxBaseDN, "ldapx-basedn", "b", "", "LDAP baseDN obfuscation middleware chain (e.g., 'OX', read the docs for details)")
 
+	// SOCKS proxy flag. Supports socks4://, socks4a:// and socks5:// URIs.
+	// Example: socks5://user:pass@127.0.0.1:1080
+	pflag.StringVarP(&config.SocksProxy, "socks", "x", "", "SOCKS proxy URI (socks4://, socks4a:// or socks5://) to tunnel LDAP, SMB, RPC and HTTP traffic")
+
 	// Register adauth flags for ingestion
 	standardAuthOptions := &adauth.Options{}
 	registerIngestionAuthFlags(standardAuthOptions, pflag.CommandLine)
@@ -195,15 +232,29 @@ func ParseFlags() (*Config, error) {
 		return nil, err
 	}
 
+	// Validate SOCKS URI and build the shared socks dial function.
+	// h12.io/socks accepts socks4://, socks4a://, socks5:// with optional
+	// userinfo and a ?timeout=<dur> query param.
+	var socksLdapDial, socksKrbDial func(network, address string) (net.Conn, error)
+	if config.SocksProxy != "" {
+		if err := validateSocksURI(config.SocksProxy); err != nil {
+			return nil, fmt.Errorf("invalid --socks URI: %w", err)
+		}
+		socksLdapDial = socksDialWithClear(applySocksTimeout(config.SocksProxy, config.LdapAuthOptions.Timeout))
+		socksKrbDial = socksDialWithClear(applySocksTimeout(config.SocksProxy, KERBEROS_TIMEOUT))
+	}
+
 	// Used for LDAP connections
 	config.LdapAuthOptions.LDAPDialer = &DialerWithResolver{
-		Resolver: resolver,
-		Timeout:  config.LdapAuthOptions.Timeout,
+		Resolver:  resolver,
+		Timeout:   config.LdapAuthOptions.Timeout,
+		SocksDial: socksLdapDial,
 	}
 
 	config.LdapAuthOptions.KerberosDialer = &DialerWithResolver{
-		Resolver: resolver,
-		Timeout:  KERBEROS_TIMEOUT,
+		Resolver:  resolver,
+		Timeout:   KERBEROS_TIMEOUT,
+		SocksDial: socksKrbDial,
 	}
 
 	isEmptyPassword := standardAuthOptions.Password == "" && pflag.CommandLine.Changed("password")
@@ -219,6 +270,9 @@ func ParseFlags() (*Config, error) {
 
 	if ingestAuth != nil {
 		ingestAuth.SetDC(config.DomainController)
+		if config.SocksProxy != "" {
+			ingestAuth.SetSocksProxy(config.SocksProxy)
+		}
 		config.IngestAuth = ingestAuth
 	}
 
@@ -231,6 +285,9 @@ func ParseFlags() (*Config, error) {
 		// Not sure if it's needed to set the DC here,
 		// setting just in case (maybe it's needed for kerberos?)
 		remoteAuth.SetDC(config.DomainController)
+		if config.SocksProxy != "" {
+			remoteAuth.SetSocksProxy(config.SocksProxy)
+		}
 		config.RemoteAuth = remoteAuth
 	} else {
 		config.RemoteAuth = ingestAuth
@@ -307,4 +364,38 @@ func setupDNSResolver(customDNS string, useTCP bool) (*CustomResolver, error) {
 	}
 
 	return customResolver, nil
+}
+
+// validateSocksURI rejects obviously malformed SOCKS proxy URIs early so the
+// user gets a clear error instead of a cryptic handshake failure at dial time.
+func validateSocksURI(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "socks4", "socks4a", "socks5":
+	default:
+		return fmt.Errorf("unsupported scheme %q (expected socks4, socks4a or socks5)", u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("missing host:port")
+	}
+	if _, _, err := net.SplitHostPort(u.Host); err != nil {
+		return fmt.Errorf("invalid host:port: %w", err)
+	}
+	return nil
+}
+
+// applySocksTimeout appends ?timeout=<dur> to the URI when not already present.
+// h12.io/socks honors this during the SOCKS handshake.
+func applySocksTimeout(uri string, timeout time.Duration) string {
+	if timeout <= 0 || strings.Contains(uri, "timeout=") {
+		return uri
+	}
+	sep := "?"
+	if strings.Contains(uri, "?") {
+		sep = "&"
+	}
+	return fmt.Sprintf("%s%stimeout=%s", uri, sep, timeout)
 }

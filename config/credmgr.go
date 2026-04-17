@@ -12,12 +12,18 @@ import (
 	"time"
 
 	"github.com/RedTeamPentesting/adauth"
+	"h12.io/socks"
 )
 
-// CustomDialer wraps a net.Dialer to use CustomResolver's cache
+// CustomDialer wraps a net.Dialer to use CustomResolver's cache.
+// If socksDial is set, it is used for all connections and local DNS
+// resolution is skipped so the SOCKS proxy resolves the hostname
+// (socks5h-like behavior). For socks4 the hostname must already be
+// an IP; use socks4a or socks5 for remote name resolution.
 type CustomDialer struct {
 	net.Dialer
-	resolver *CustomResolver
+	resolver  *CustomResolver
+	socksDial func(network, address string) (net.Conn, error)
 }
 
 func (cd *CustomDialer) Dial(network, address string) (net.Conn, error) {
@@ -25,6 +31,35 @@ func (cd *CustomDialer) Dial(network, address string) (net.Conn, error) {
 }
 
 func (cd *CustomDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	// If a SOCKS dialer is configured, delegate everything to it.
+	// Hostnames are passed through so the proxy handles resolution.
+	if cd.socksDial != nil {
+		// h12.io/socks does not expose a DialContext; honor ctx via a
+		// goroutine + cancellation so ctx timeouts are respected.
+		type result struct {
+			conn net.Conn
+			err  error
+		}
+		ch := make(chan result, 1)
+		go func() {
+			c, err := cd.socksDial(network, address)
+			ch <- result{c, err}
+		}()
+		select {
+		case <-ctx.Done():
+			// Best effort: close the conn if it arrived after cancel
+			go func() {
+				r := <-ch
+				if r.conn != nil {
+					r.conn.Close()
+				}
+			}()
+			return nil, ctx.Err()
+		case r := <-ch:
+			return r.conn, r.err
+		}
+	}
+
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, err
@@ -52,6 +87,7 @@ func (cd *CustomDialer) DialContext(ctx context.Context, network, address string
 type CredentialMgr struct {
 	credential  *adauth.Credential
 	useKerberos bool
+	socksProxy  string
 }
 
 func NewCredentialMgr(credential *adauth.Credential, useKerberos bool) *CredentialMgr {
@@ -69,6 +105,17 @@ func (a *CredentialMgr) SetDC(dc string) {
 	a.credential.SetDC(dc)
 }
 
+// SetSocksProxy configures a SOCKS proxy URI (e.g. socks5://127.0.0.1:1080)
+// to be used by every Dialer this manager produces. An empty string disables
+// the proxy.
+func (a *CredentialMgr) SetSocksProxy(uri string) {
+	a.socksProxy = uri
+}
+
+func (a *CredentialMgr) SocksProxy() string {
+	return a.socksProxy
+}
+
 func (a *CredentialMgr) Kerberos() bool {
 	return a.useKerberos
 }
@@ -84,7 +131,49 @@ func (a *CredentialMgr) Dialer(timeout time.Duration) *CustomDialer {
 		}
 	}
 
+	if a.socksProxy != "" {
+		// Embed timeout into the URI so h12.io/socks honors it at dial time.
+		// socksDialWithClear strips the deadline that the SOCKS5 handshake
+		// leaves on the connection, so long-running reads (paged LDAP
+		// searches, large SMB/RPC transfers) are not killed by it.
+		dialer.socksDial = socksDialWithClear(appendSocksTimeout(a.socksProxy, timeout))
+	}
+
 	return dialer
+}
+
+// appendSocksTimeout injects ?timeout=<dur> into a SOCKS URI when the user
+// has not specified one. h12.io/socks reads this query parameter to bound
+// the proxy handshake.
+func appendSocksTimeout(uri string, timeout time.Duration) string {
+	if timeout <= 0 {
+		return uri
+	}
+	if strings.Contains(uri, "timeout=") {
+		return uri
+	}
+	sep := "?"
+	if strings.Contains(uri, "?") {
+		sep = "&"
+	}
+	return fmt.Sprintf("%s%stimeout=%s", uri, sep, timeout)
+}
+
+// socksDialWithClear wraps a SOCKS dial function to strip any residual
+// Read/Write deadline left on the connection by the SOCKS5 handshake.
+// h12.io/socks v1.0.3 clears deadlines on the SOCKS4 path but forgets to
+// do so on the SOCKS5 path, which causes i/o timeouts on long-running
+// LDAP paged searches that exceed the handshake timeout.
+func socksDialWithClear(uri string) func(network, address string) (net.Conn, error) {
+	inner := socks.Dial(uri)
+	return func(network, address string) (net.Conn, error) {
+		c, err := inner(network, address)
+		if err != nil {
+			return nil, err
+		}
+		_ = c.SetDeadline(time.Time{})
+		return c, nil
+	}
 }
 
 func (a *CredentialMgr) Resolver() *net.Resolver {

@@ -23,6 +23,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	golang.org/x/sync v0.19.0
 	gopkg.in/yaml.v3 v3.0.1
+	h12.io/socks v1.0.3
 )
 
 require (
